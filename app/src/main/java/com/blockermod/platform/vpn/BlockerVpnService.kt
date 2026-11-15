@@ -1,4 +1,4 @@
-package com.blockermod.core.vpn
+package com.blockermod.platform.vpn
 
 import android.net.VpnService
 

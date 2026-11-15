@@ -10,13 +10,11 @@
         <exclude domain="database" />
         <exclude domain="sharedpref" />
         <exclude domain="file" />
-        <exclude domain="external" />
     </cloud-backup>
     <device-transfer>
         <exclude domain="root" />
         <exclude domain="database" />
         <exclude domain="sharedpref" />
         <exclude domain="file" />
-        <exclude domain="external" />
     </device-transfer>
 </data-extraction-rules>

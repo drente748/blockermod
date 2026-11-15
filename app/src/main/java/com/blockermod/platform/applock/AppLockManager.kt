@@ -1,10 +1,10 @@
-package com.blockermod.core
+package com.blockermod.platform.applock
 
 /**
  * Contract for application locking: preventing an app from being used until the user passes a
  * verification step.
  *
- * Contracts only. The implementation depends on system capabilities (usage stats, accessibility)
+ * Contracts only. The implementation depends on system capabilities and user-granted permission,
  * and is not part of the current phase.
  */
 interface AppLockManager {

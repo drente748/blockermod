@@ -1,4 +1,4 @@
-package com.blockermod.core
+package com.blockermod.platform.deviceowner
 
 /**
  * Contract for the device owner mode.

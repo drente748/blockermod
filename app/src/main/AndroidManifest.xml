@@ -5,7 +5,7 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
-    <!-- The engine runs as a foreground service; Android 14+ requires an explicit foreground service type. -->
+    <!-- The engine runs as a foreground service; the special-use type applies to VPN-like use cases. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
@@ -14,26 +14,30 @@
         android:name=".BlockermodApp"
         android:allowBackup="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
-        android:fullBackupContent="@xml/backup_rules"
+        android:fullBackupContent="false"
         android:label="@string/app_name"
         android:supportsRtl="true">
 
         <!--
-          The blocking engine is a VpnService. This declaration is the product entry point;
+          The blocking engine is a VpnService. The declaration below is the product entry point;
           the tunnel, the resolver and the rule matcher are implemented in a later phase
           (see PROGRESS.md).
         -->
         <service
-            android:name=".core.vpn.BlockerVpnService"
-            android:exported="false"
-            android:foregroundServiceType="specialUse"
-            android:permission="android.permission.BIND_VPN_SERVICE">
-            <property
-                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="vpn_blocking_engine" />
+            android:name=".platform.vpn.BlockerVpnService"
+            android:exported="true"
+            android:permission="android.permission.BIND_VPN_SERVICE"
+            android:stopWithTask="false"
+            android:foregroundServiceType="specialUse">
             <intent-filter>
                 <action android:name="android.net.VpnService" />
             </intent-filter>
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="vpn_blocking_engine" />
+            <meta-data
+                android:name="android.net.VpnService.SUPPORTS_ALWAYS_ON"
+                android:value="true" />
         </service>
     </application>
 

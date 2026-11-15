@@ -26,6 +26,7 @@
 | الاتصال الخدمي | **لا اتصال بأي خادم تابع لـ BlockerMod**: لا تحليلات، ولا إحصاءات، ولا فحص تحديثات، ولا مزامنة سحابية |
 | بيانات المستخدم | لا تُرسل خارج الجهاز إطلاقاً |
 | النسخ الاحتياطي | **معطّل بالكامل**: لا نسخة سحابية ولا نقل بيانات بين الأجهزة |
+| الترخيص | Apache-2.0 (انظر `LICENSE`) |
 
 **استثناء تشغيلي واحد:** الشبكة مطلوبة تقنياً ليعمل محرك الحجب (إعادة توجيه استعلامات DNS داخل
 نفق VPN المحلي). هذا اتصال بحلّال DNS يختاره النظام أو المستخدم، وليس اتصالاً بخدمة
@@ -42,79 +43,73 @@ BlockerMod، ولا يحمل أي معرّف.
 1. **المحرك قبل الواجهة**: لا شاشة قبل أن يعمل محرك الحجب.
 2. **بلا اتصال خدمي**: كل قرار محلي.
 3. **بلا إطار DI**: بناء يدوي وصريح، بلا انعكاس.
-4. **طبقات باتجاه واحد**: `app → platform → core`، ولا رجوع.
+4. **وحدتان باتجاه واحد**: `:app → :core`، ولا رجوع.
 5. **وضع تشغيل واحد**: انظر `ARCHITECTURE.md`.
-6. **قابل للاختبار**: منطق المطابقة (القواعد والنطاقات) بدون Android، فيُختبر على جهاز JVM.
+6. **قابل للاختبار**: منطق الحظر في `:core` Kotlin/JVM خالص، فيُختبر على الجهاز الحقيقي للمطور
+   (JVM) بلا محاكي.
 7. **بلا انعكاس على داخليات النظام**: لا تعديل لحقول `static final` ولا وصول لحقول خاصة.
-
-## سياسات النظام التي التزم بها البنية
-
-قرارات البنية مبنية على ما تفرضه إصدارات أندرويد الحديثة على تطبيقات VPN والخدمات الأمامية:
-
-- **الخدمة الأمامية**: نوع `specialUse` مع خاصية subtype تُعلن الغرض (`vpn_blocking_engine`)،
-  واستدعاء `startForeground` بنوع صريح عبر `ServiceCompat` عند تشغيل المحرك.
-- **الموافقة على VPN**: طلب موافقة النظام (`VpnService.prepare`) يُطلق من نشاط مرئي فقط، لأن إطلاق
-  النشاطات من الخلفية مقيّد بشدة.
-- **الشبكة المحلية**: يُتجنّب أي اتصال بحلّال داخل الشبكة المحلية، فلا حاجة لإذن
-  `ACCESS_LOCAL_NETWORK` ولا لتvasive المستخدم.
-- **الاتصال المشفّر**: إن استُخدم DNS-over-HTTPS لاحقاً، فليست هذه النسخة مفعّلة افتراضياً عند
-  الاستهداف الحديث، ويصبح التحقق من الشهادات إلزامياً — فلا تُبنَ الحلول على تجاوزات.
-- **عدم الانعكاس**: الحقول `static final` غير قابلة للتعديل على الإصدارات الحديثة، فلا مساس بها.
-- **لا تحميل كود ديناميكي**: لا مكتبات أصلية تُحمَّل أثناء التشغيل.
-- **النسخ الاحتياطي**: معطّل على كل الإصدارات (استثناء كل النطاقات من أي آلية نسخ أو نقل).
 
 ## بنية المشروع
 
 ```
 blockermod/
-├── settings.gradle.kts           # وحدات المشروع ومستودعات التبعيات
+├── settings.gradle.kts           # الوحدات: app وcore
 ├── build.gradle.kts              # إضافة التطبيق (نسخة واحدة من كتالوج الإصدارات)
-├── gradle.properties             # إعدادات البناء
 ├── gradle/
 │   ├── libs.versions.toml        # كتالوج الإصدارات (إضافة + مكتبات)
 │   └── wrapper/                  # مُشغّل Gradle المُثبَّت
+├── gradle.properties
 ├── gradlew / gradlew.bat
-├── app/
-│   ├── build.gradle.kts          # إعدادات الوحدة: SDK، الإصدارات، الاعتماديات
-│   └── src/main/
-│       ├── AndroidManifest.xml   # الأذونات + نقطة دخول المحرك (VpnService)
-│       ├── res/values/strings.xml
-│       ├── res/xml/               # استثناء كامل من النسخ الاحتياطي ونقل البيانات
-│       └── java/com/blockermod/
-│           ├── BlockermodApp.kt        # Application
-│           └── core/
-│               ├── BlockingEngine.kt   # عقد محرك الحجب
-│               ├── AppLockManager.kt   # عقد قفل التطبيقات
-│               ├── DeviceOwnerManager.kt # عقد مالك الجهاز
-│               ├── BlockDecision.kt     # قرار الحظر
-│               └── vpn/
-│                   └── BlockerVpnService.kt # مضيف المحرك (بلا منطق بعد)
+├── LICENSE                       # Apache-2.0
+├── core/                         # Kotlin/JVM خالص — بلا Android
+│   ├── build.gradle.kts
+│   └── src/
+│       ├── main/kotlin/com/blockermod/core/   # BlockingEngine, BlockingResult, BlockReason, BlockingState, DomainMatcher
+│       └── test/kotlin/com/blockermod/core/   # اختبارات JVM للمطابقة والقرار
+└── app/
+    ├── build.gradle.kts          # إعدادات الوحدة: SDK، الإصدارات، الاعتماديات
+    └── src/main/
+        ├── AndroidManifest.xml   # الأذونات + نقطة دخول المحرك (VpnService)
+        ├── res/values/strings.xml
+        ├── res/xml/              # استثناء كامل من النسخ الاحتياطي ونقل البيانات
+        └── java/com/blockermod/
+            ├── BlockermodApp.kt        # Application
+            └── platform/
+                ├── vpn/BlockerVpnService.kt       # مضيف المحرك (بلا منطق بعد)
+                ├── deviceowner/DeviceOwnerManager.kt  # عقد الوضع المستقبلي
+                └── applock/AppLockManager.kt          # عقد مستقبلي
 ```
 
 لغة التطبيق (الشيفرة والموارد والتسميات) إنجليزية. وثائق المشروع عربية.
+
+## قضايا تشغيلية
+
+القضايا التي ستحدّد نجاح المحرك (موقف تشفير DNS، حماية المقابس، مسار الإقلاع دائم الاتصال، وتجريد
+مُطابِق النطاقات) موضّحة وحاسمة في `ARCHITECTURE.md` ضمن أقسام "DNS Encryption Policy"،
+"Socket Protection"، "Always-On Startup Path" و"Domain Matcher Abstraction". تُحال عليها ولا
+تُكرَّر هنا.
 
 ## المتطلبات
 
 | الأداة | الإصدار |
 |---|---|
-| JDK | 17 أو أحدث (JBR 25 مُختبَر) |
+| JDK | 17 (JBR 25 مُختبَر) |
 | Gradle | 9.9.1 (عبر `gradlew`) |
 | Android Gradle Plugin | 9.5.1 |
-| Kotlin | مُدار عبر دعم AGP المدمج؛ لا تُطبَّق إضافة `kotlin-android` |
-| compileSdk / targetSdk | 37 |
+| Kotlin | مُدار عبر دعم AGP المدمج في `:app`؛ `:core` يستخدم Kotlin JVM 2.2.10 مطابقًا لإصدار AGP |
+| compileSdk / targetSdk | 37 (compileSdkMinor = 0) |
 | minSdk | 26 (Android 8.0) |
 
 ## البناء والتحقق
 
 ```bash
-# ترجمة كود التطبيق دون إنتاج APK
-./gradlew :app:compileDebugKotlin
-
-# فحص الأخطاء (lint)
-./gradlew :app:lintDebug
+./gradlew :core:build :core:test   # منطق الحظر: ترجمة واختبارات JVM
+./gradlew :app:assembleDebug       # التطبيق: حزمة تحقق
+./gradlew :app:lintDebug           # فحص الأخطاء
 ```
 
-> لا يُنتَج ملف APK في هذه المرحلة عمداً: لا يوجد محرك ولا واجهة بعد، فأي APK حالياً بلا قيمة.
+> لا تُنتَج نسخة نهائية للتوزيع في هذه المرحلة: لا يوجد محرك ولا واجهة بعد.
+> `assembleRelease` تُستخدم للتحقق فقط وليست خطوة إطلاق.
 
 ## الخصوصية
 
