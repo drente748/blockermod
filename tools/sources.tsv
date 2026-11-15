@@ -1,0 +1,7 @@
+name	url	commit	sha256	license_url	decision	approver	date
+ha-casco	https://raw.githubusercontent.com/HaCasco/ha-blocklist/master/hosts.txt	TBD	TBD	https://github.com/HaCasco/ha-blocklist/blob/master/LICENSE	NEEDS HUMAN		
+steven-black	https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts	TBD	TBD	https://github.com/StevenBlack/hosts/blob/master/LICENSE	NEEDS HUMAN		
+adguard-filters	https://adguardteam.github.io/AdGuardFilters/filters/filter_1.txt	TBD	TBD	https://github.com/AdguardTeam/AdGuardFilters/blob/master/LICENSE	NEEDS HUMAN		
+hostlists-registry	https://adguardteam.github.io/HostlistsRegistry/assets/filter_1.txt	TBD	TBD	https://github.com/AdguardTeam/HostlistsRegistry/blob/main/LICENSE	NEEDS HUMAN		
+firehol-ipsets	https://raw.githubusercontent.com/firehol/blocklist-ipsets/master/firehol_level1.netset	TBD	TBD	https://github.com/firehol/blocklist-ipsets/blob/master/LICENSE	NEEDS HUMAN		
+energized-unblock	https://raw.githubusercontent.com/EnergizedProtection/Unblock-YouTube-Adblockers-Filter/master/filter.txt	TBD	TBD	https://github.com/EnergizedProtection/Unblock-YouTube-Adblockers-Filter/blob/master/LICENSE	NEEDS HUMAN		

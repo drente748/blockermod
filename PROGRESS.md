@@ -6,101 +6,103 @@
 
 | البند | القيمة |
 |---|---|
-| المرحلة الحالية | 0 — الهيكل الأساسي (مكتملة فعلياً) |
-| المرحلة التالية | 1 — محرك الحجب (لم تبدأ) |
-| واجهة مستخدم | غير موجودة (مؤجّلة حتى يعمل المحرك) |
-| البناء | `clean` + `:core:build`/`:core:test` + `assembleDebug/Release` + `lintDebug` — 0 خطأ |
+| المرحلة | 1 — محرك الحجب (الموجة 5 من 5 مكتملة) |
+| الوحدات | `:core` (Kotlin/JVM خالص) و`:app` (أندرويد) |
+| الاختبارات | **122 اختبارًا** في `:core` و`:app`، بلا فشل |
+| Lint | 0 خطأ (تحذير واحد: أيقونة التطبيق، مرحلة الهوية) |
+| الوثائق | `docs/ARCHITECTURE.md`، `docs/PERF_CONTRACT.md`، `docs/MANUAL_TESTS.md`، `docs/LICENSE_DECISIONS.md`، `docs/THIRD_PARTY_NOTICES.md` |
+| بناء APK | يعمل (`assembleDebug` و`assembleRelease`) |
+| التوزيع | لا شيء منشور بعد |
 
-## آخر تعديلات هذه الجولة
+## آخر تعديلات هذه الجولة (الموجة 5)
 
-- **رفع قيد عدم الاتصال بالإنترنت من الوثائق بالكامل**: أي نص في `README.md` و`ARCHITECTURE.md`
-  و`PROGRESS.md` و`CONTRIBUTING.md` يحظر الاتصال بالإنترنت أو يفرض العمل Offline حُوِّل إلى
-  **سياسة مفتوحة (غير محسومة)** — تُقرَّر لاحقًا حسب رغبتك.
-- **لا تعديل على الكود ولا المانيفست ولا ملفات البناء**.
-- **ملاحظة سياقية**: هذا المستودع لا يحتوي أصلاً على أي جزء من "ميزة التحديث" (لا ملفات تحديث،
-  لا `AppContainer.kt`، لا مفتاح تحديث في أي ملف، لا `REQUEST_INSTALL_PACKAGES`، لا `.github/`)،
-  فتعليمات إزالتها بالكامل لا تُوجد ما يُحذف. بقيت `INTERNET` لأنها مطلوبة لمحرك الحجب نفسه،
-  وأذونات الخدمة تبقى لأنها إلزام فحص `lintDebug` على إعلان الـ VpnService.
+- **توليد جدول SafeSearch وقت البناء**: `tools/build-safesearch.sh` يبني `app/src/main/assets/safesearch.json`
+  من خمسة مصادر فقط (S1–S5): لقطة نطاقات Google الرسمية (187 نطاقًا إقليميًا ⇒ `www.<domain>`)،
+  Bing، DuckDuckGo، Brave، YouTube — **197 مدخلًا**، بمطابقة exact بلا تخمين.
+- **لُقطة نطاقات Google**: `tools/supported-domains-google.txt` (مأخوذة من `google.com/supported_domains`
+  بتاريخ 2026-11-15) — لقطة ثابتة تُقرأ وقت البناء، بلا تنزيل وقت التشغيل.
+- **`STRICT_RESOLVER_IPS` معطّل افتراضيًا**: `StrictResolverIps.STRICT_RESOLVER_IPS_ENABLED = false`،
+  وقائمة العناوين فارغة حتى قرار الترخيص؛ الميزة توثّق أثرها على البطارية في
+  `docs/ARCHITECTURE.md` و`docs/PERF_CONTRACT.md`.
+- **الوثائق النهائية**: `docs/ARCHITECTURE.md` (نُقل من الجذر، وبأقسام Routing Model وSafeSearch
+  Rewrite وData Pipeline & License Gate وPerformance Contract وLockout (Planned))، و
+  `docs/MANUAL_TESTS.md` بست مجموعات اختبار يدوي مع حالة كل مجموعة.
+- **تصحيح تناقض DNS**: إسقاط 853/443 صار مقيّدًا بعناوين الـ resolvers الموجَّهة فقط، وعمومًا لا
+  يُحظر التشفير داخل النفق (النفق يلتقط عنوان DNS الافتراضي فقط)، مع توثيق أن DNS/53 مستثنى من
+  `ACCESS_LOCAL_NETWORK`.
 
 ## ما هو موجود في المشروع فعليًا
 
-- **وحدة `:core` مستقلة** (`kotlin("jvm")` + `jvmToolchain(17)`): عقود الحظر فقط
-  (`BlockingEngine` بـ `state`/`start()`/`stop()`/`evaluate(domain)`)، `BlockingResult`
-  (`Allowed`/`Blocked(reason)`/`Error(message)`)، `BlockReason`، `BlockingState`، `DomainMatcher`.
-  اختبارات JVM في `:core` تعمل بلا جهاز.
-- **`:app` منفصلة إلى حزم `platform.*`**: `platform.vpn` (المضيف)، `platform.deviceowner`،
-  `platform.applock`. حُذفت `com.blockermod.core` داخل التطبيق بالكامل.
-- **الترخيص**: `LICENSE` (Apache-2.0).
-- **`jvmTarget` صريح** (`JVM_17`) في `:app` و`:core` بدل الاشتقاق الضمني.
-- **النسخ الاحتياطي معطّل كلياً**: `allowBackup="false"` + `fullBackupContent="false"` +
-  `dataExtractionRules` تستثني كل النطاقات؛ حُذف `backup_rules.xml` لانتفاء الحاجة.
-- **نوع الخدمة الأمامية: `specialUse`** (بعد استبعاد `systemExempted` الذي يشترط في فحص AGP 9.5.1
-  إذن منبّهات دقيقة بلا مسوّغ شرعي لهذا التطبيق)، مع خاصية subtype `vpn_blocking_engine`،
-  و`SUPPORTS_ALWAYS_ON=true`، و`exported="true"`، و`stopWithTask="false"`.
-- **إعدادات Gradle للبيئات المحدودة**: الجهاز 4GB؛ خُفّض heap و`workers.max=1`، وعُطّل `parallel`.
-  إضافة `foojay` في `settings.gradle.kts` توفّر JDK 17 تلقائيًا (`jvmToolchain(17)`).
-- **`ARCHITECTURE.md`** يشرح: وحدتا البناء والاتجاه، DNS Encryption Policy، Socket Protection،
-  Always-On Startup Path، Domain Matcher Abstraction.
-- **دمج `BlockDecision` في `BlockingResult`**: لا هرم قرار مكرر؛ `evaluate` يعيد `BlockingResult`.
-- **سياسة الاتصال مفتوحة**: لا استدعاءات شبكة في الكود الحالي ولا أي اعتماد يتصل بخدمة؛ أي قرار
-  اتصال مستقبلي بيدك، ولا يمنعه هذا البناء ولا يفرضه.
+### `:core` — منطق خالص بلا أندرويد
 
-## المرحلة 0 — الهيكل الأساسي [مكتملة]
+- **العقود**: `BlockingEngine` (`state`/`start()`/`stop()`/`evaluate(domain)`)، `BlockingResult`
+  (`Allowed`/`Blocked(reason)`/`Rewrite(target, original)`/`Error(message)`)، `BlockReason`، `BlockingState`،
+  `DomainMatcher`، `SafeSearchTable`، `LockoutPolicy` + `NoOpLockoutPolicy`.
+- **المحرّك**: `policy/PolicyEngine` بثمانية مسارات مرتبة + fail-safe عند التهيئة.
+- **المطابقة**: `matcher/BinarySearchDomainMatcher` (بحث ثنائي على `ByteBuffer`)،
+  `matcher/InMemoryDomainMatcher`، و`matcher/DomainNormalizer` (تطبيع مشترك).
+- **البروتوكول**: `dns/DnsCodec` (تحليل الاستعلامات وبناء الردود، مؤشرات ضغط بحدّ 10 قفزات) و
+  `net/Ipv4UdpCodec` (ترميز IPv4/UDP مع تحقّق الـ checksums).
 
-- [x] وحدتا Gradle: `:core` (Kotlin/JVM خالص، بلا Android) و`:app` (Android)، اتجاه الاعتمادية أحادي: `:app → :core`.
-- [x] سلسلة أدوات: Android Gradle Plugin `9.5.1`، Gradle `9.9.1`، `compileSdk/targetSdk 37` (`compileSdkMinor = 0`)، `minSdk 26`، هدف JVM 17.
-- [x] كتالوج إصدارات `gradle/libs.versions.toml` (AGP + مكتبات فقط).
-- [x] `local.properties` يشير إلى SDK المحلي؛ `.gitignore` يغطي مخرجات البناء و`.kotlin/`.
-- [x] `BlockermodApp` + `AndroidManifest.xml` بالخدمة المعلنة ودون أي أذونات تحديث.
-- [x] `:core/`: عقود + اختبارات JVM (`DomainMatcherTest`، `BlockingResultTest`).
-- [x] توثيق: `README.md`، `ARCHITECTURE.md`، `CHANGELOG.md`، `CONTRIBUTING.md`، `LICENSE`.
+### `:app` — تكامل النظام
 
-**قيد مقصود:** لا ميزة ولا واجهة ولا ثيم، ولا نشر للتوزيع في هذه المرحلة.
+- **الخدمة والنفق**: `platform/vpn/BlockerVpnService` (Builder بمسار /32 واحد، `startForeground` قبل
+  `establish`، `onRevoke` ⇒ إيقاف نظيف ⇒ `Idle`، كشف Private DNS عبر `LinkProperties`)،
+  `platform/vpn/VpnTunnel` (خيط قراءة + 8 عمّال + طابور 1024 + خيط latch بلا polling)،
+  `platform/vpn/DnsResponder` (قرار ⇒ رد DNS)، `platform/vpn/UpstreamResolver` (Do53 إلى خوادم الشبكة
+  النشطة، ربط المقبس قبل connect)، `platform/vpn/DnsCache` (LRU 512، TTL 30–300)،
+  `platform/vpn/DnsWire` (بناء الاستعلام وقراءة إجابات upstream)، `platform/vpn/DecisionTrail`،
+  `platform/vpn/StrictResolverIps` (معطّل).
+- **العقود غير المفعّلة**: `platform/deviceowner/DeviceOwnerManager`، `platform/applock/AppLockManager`.
+- **الأصول**: `blocklist.bin` + `blocklist.meta` (عنصر نائب للاختبار)، `safesearch.json` (197 مدخلًا).
+- **الأدوات**: `tools/build-blocklist.sh` (بوابة ترخيص صارمة، خروج 2 قبل أي تنزيل)،
+  `tools/build-safesearch.sh`، `tools/sources.tsv`، `tools/allowlist.txt`، `tools/safesearch-hosts.txt`،
+  `tools/placeholder-domains.txt`، `tools/supported-domains-google.txt`.
+- **خط الأنابيب**: `.github/workflows/android.yml` (بناء + اختبار + تسعة فحوص `grep` تفشل البناء).
 
-## المرحلة 1 — محرك الحجب [لم تبدأ]
+## المرحلة 1 — محرك الحجب
 
-- [ ] حلّال DNS داخل `VpnService`: التقاط الاستعلام، تحليل اسم النطاق، الردّ.
-- [ ] مطابقة النطاق عبر `DomainMatcher` (تطبيق Trie معكوس على التسميات في المرحلة 1).
-- [ ] قائمة قواعد مضمّنة داخل التطبيق (الصيغة والنطاق ومصدر المراجعة).
-- [ ] تمرير الاستعلامات المسموحة عبر منفذ محمي بـ `VpnService.protect()`.
-- [ ] حظر المنفذ 853 (DoT) داخل النفق افتراضياً، وDoH في المتصفحات موثق كتابع غير معالج.
-- [ ] إشعار دائم للخدمة + `onStartCommand`/`onRevoke`/`onDestroy`، ومسار إقلاع Always-On بلا نشاط.
-- [ ] استدعاء `VpnService.prepare()` من نشاط مرئي فقط (أول شاشة، آخر خطوة في هذه المرحلة).
-- [ ] قياس الأثر: هل يعترض المسار نسبة معقولة من استعلامات النظام؟
+| الموجة | الحالة | المحتوى |
+|---|---|---|
+| W1 — الأساس النقي | مكتملة | محلّل DNS، مرمّز IPv4/UDP، مطابق على `ByteBuffer`، عقد القفل، اختبارات |
+| W2 — سياسة القرار | مكتملة | `Rewrite`، ترتيب السياسة الثمانية، جدول SafeSearch، دمج `LockoutPolicy` |
+| W3 — النفق | مكتملة | `BlockerVpnService` كامل (DNS فقط)، pool محدود، LRU، فحوص CI، `docs/PERF_CONTRACT.md` |
+| W4 — خط البيانات | مكتملة | سكريبت بناء `blocklist.bin`، بوابة ترخيص، قالبا الإشعارات، عنصر نائب |
+| W5 — SafeSearch والتوثيق | مكتملة | توليد جدول SafeSearch، `STRICT_RESOLVER_IPS` معطّل، `docs/MANUAL_TESTS.md`، الوثائق النهائية |
 
-## المرحلة 2 — الواجهة [مؤجّلة حتى تكتمل المرحلة 1]
+## المرحلة 2 — الواجهة
 
-- [ ] شاشة واحدة: تشغيل/إيقاف + حالة المحرك (Material 3، بلا أصول خارجية).
+- [ ] شاشة واحدة: تشغيل/إيقاف + حالة المحرك + تحذير Private DNS.
+- [ ] إشعار دائم يوضّح أن الحماية تعمل.
+- [ ] قراءة `safesearch.json` و`blocklist.bin` من الأصول وربطهما بالمحرّك.
+- [ ] الثيم: Material 3 على الأقل، بلا أصول خارجية.
 
-## المرحلة 3 — التوزيع [لم تبدأ]
+## المرحلة 3 — التوزيع
 
-- [ ] بناء APK موقّع + نسخة release مع R8.
-- [ ] تثبيت على جهاز فعلي واختبار Wi-Fi وبيانات الجوال.
-- [ ] دليل استخدام داخل التطبيق.
+- [ ] APK موقّع + نسخة release مع R8.
+- [ ] اختبار على جهاز فعلي وفق `docs/MANUAL_TESTS.md`.
+- [ ] قرار التراخيص وإنتاج قوائم حقيقية.
 
 ## التحقق الحالي
 
 | # | الأمر | النتيجة |
 |---|---|---|
-| 1 | `./gradlew clean` | SUCCESS |
-| 2 | `./gradlew :core:build :core:test` | SUCCESS — اختبارات JVM تعمل بلا Android |
+| 1 | `./gradlew :core:test` | SUCCESS — اختبارات JVM |
+| 2 | `./gradlew :app:testDebugUnitTest` | SUCCESS — اختبارات وحدة التطبيق (النفق، الرد، المخبأة) |
 | 3 | `./gradlew :app:assembleDebug` | SUCCESS |
 | 4 | `./gradlew :app:assembleRelease` | SUCCESS |
-| 5 | `./gradlew :app:lintDebug` | **0 خطأ**، تحذير وحيد: `MissingApplicationIcon` (الأيقونة مرحلة هوية) |
-| 6 | `grep -r "import android" core/src/` | 0 نتائج |
-| 7 | `grep -r "specialUse" app/src/` | نتائج موجودة **بالقرار** (بعد استبعاد `systemExempted`) |
-| 8 | `grep -r "AccessibilityService\|UsageStatsManager" app/src/` | 0 نتائج |
-| 9 | `grep -r "REQUEST_INSTALL_PACKAGES" app/src/` | 0 نتائج |
-| 10 | `grep -r "GitHub\|https?://" app/src/` | مساحة أسماء Android الإلزامية فقط |
+| 5 | `./gradlew :app:lintDebug` | SUCCESS — 0 خطأ، تحذير `MissingApplicationIcon` فقط |
+| 6 | فحوص `grep` في CI | 0 نتائج في التسعة فحوص |
+| 7 | `bash -n tools/build-blocklist.sh` | صياغة صحيحة (السكريبت نفسه لم يُنفَّذ: بوابة الترخيص تُخرج 2 قبل أي تنزيل) |
+| 8 | `tools/build-safesearch.sh` | نجح (قراءة محلية فقط) ⇒ 197 مدخلًا |
 
 ## قرارات ثابتة
 
-- **سياسة الاتصال بالشبكة مفتوحة (غير محسومة)**: تُقرَّر لاحقًا حسب رغبتك؛ لا يفرض هذا البناء أي قيد
-  على أي اتصال مستقبلي ولا يمنعه (لا قياس ولا إحصاء أو تحديثات داخل التطبيق ما لم تقررها أنت لاحقًا).
-- **وضع تشغيل واحد**: نفق DNS محلي داخل `VpnService` فقط (لا root ولا Device Owner ولا فلترة متصفح).
-- **وحدتان باتجاه واحد** `:app → :core` — انقل لا تنسخ عند أي تحريك.
-- **بلا إطار DI**، بلا انعكاس على داخليات النظام، بلا تحميل كود ديناميكي.
-- **`BlockingEngine` يعتمد `DomainMatcher`** لا `Set<String>` — التنفيذ اللاحق خلف الواجهة.
-- **النسخ الاحتياطي معطّل على كل الإصدارات.**
-- **تقسيم Gradle modules أبعد من `:app`/`:core` مؤجّل** حتى تستقر حدود الكود.
+- **وضع تشغيل واحد**: نفق DNS محلي (لا root ولا Device Owner ولا فلترة متصفح).
+- **وحدتان باتجاه واحد** `:app → :core`؛ بلا إطار DI، بلا انعكاس، بلا كود ديناميكي.
+- **بلا اتصال خدمي**: القواعد داخل التطبيق، والتحديث بتثبيت APK يدويًا.
+- **النسخ الاحتياطي معطّل** على كل الإصدارات.
+- **بوابة الترخيص قبل التنزيل**: أي مصدر قراره ليس `auto-allowed` ⇒ `NEEDS HUMAN` وخروج بالرمز 2.
+- **`STRICT_RESOLVER_IPS` معطّل** حتى قرار الترخيص؛ قائمة العناوين فارغة الآن.
+- **`Lockout` مخطط له**: العقد في `:core`، والتنفيذ مؤجّل لموجة لاحقة بلا تغيير على W1–W5.
 - **R8 والتصغير مؤجّلان** حتى المرحلة 3.

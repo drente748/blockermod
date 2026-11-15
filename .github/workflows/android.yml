@@ -1,0 +1,89 @@
+name: android
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Make the wrapper executable
+        run: chmod +x gradlew
+
+      - name: Test and build
+        run: ./gradlew :core:test :app:testDebugUnitTest :app:assembleDebug :app:lintDebug
+
+      - name: R1 no default route
+        run: |
+          if grep -rn "0\.0\.0\.0/0\|::/0" app/src/; then
+            echo "::error::a default route was found, the tunnel must only capture the virtual DNS address"
+            exit 1
+          fi
+
+      - name: R4 no scheduler or wake up mechanism
+        run: |
+          if grep -rn "WakeLock\|AlarmManager\|WorkManager\|Timer(\|ScheduledExecutor\|postDelayed" app/src/main/java/com/blockermod/platform/vpn/; then
+            echo "::error::a scheduler or wake up mechanism was found in the tunnel"
+            exit 1
+          fi
+
+      - name: R5 no deep access to other applications
+        run: |
+          if grep -rn "AccessibilityService\|UsageStatsManager" app/src/; then
+            echo "::error::the tunnel must not use accessibility or usage stats"
+            exit 1
+          fi
+
+      - name: R10 no hardcoded safe search host
+        run: |
+          if grep -rn "forcesafesearch\|strict\.bing\|safe\.duckduckgo" app/src/main/java/com/blockermod/platform/vpn/; then
+            echo "::error::a safe search host was hardcoded in the tunnel"
+            exit 1
+          fi
+
+      - name: R10 no hardcoded public resolver
+        run: |
+          if grep -rn "8\.8\.8\.8\|1\.1\.1\.1\|9\.9\.9\.9" app/src/; then
+            echo "::error::a public resolver was hardcoded, the servers of the active network must be used"
+            exit 1
+          fi
+
+      - name: R6 no network client library
+        run: |
+          if grep -rn "OkHttp\|Retrofit\|KtorClient\|HttpURLConnection\|java\.net\.URL\|java\.net\.Socket" app/src/; then
+            echo "::error::a network client library was found, the tunnel only speaks plain UDP DNS"
+            exit 1
+          fi
+
+      - name: R3 no sleeping or polling
+        run: |
+          if grep -rn "Thread\.sleep\|SystemClock\.sleep" app/src/main/java/; then
+            echo "::error::sleeping was found, the tunnel waits on a latch instead"
+            exit 1
+          fi
+
+      - name: R10 no logging in the packet path
+        run: |
+          if grep -rn "Log\.\|println(" app/src/main/java/com/blockermod/platform/vpn/VpnTunnel.kt app/src/main/java/com/blockermod/platform/vpn/DnsResponder.kt app/src/main/java/com/blockermod/platform/vpn/UpstreamResolver.kt app/src/main/java/com/blockermod/platform/vpn/DnsCache.kt app/src/main/java/com/blockermod/platform/vpn/DnsWire.kt; then
+            echo "::error::logging was found in the packet path"
+            exit 1
+          fi
+
+      - name: No external endpoint in the sources
+        run: |
+          if grep -rn "https\?://" app/src/main/java/; then
+            echo "::error::an external endpoint was found in the sources"
+            exit 1
+          fi

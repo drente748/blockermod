@@ -1,0 +1,6 @@
+# Hosts that carry the safe search canonical names. Blocking them would break the rewrite.
+# One host per line, comments start with a hash.
+
+forcesafesearch.google.com
+strict.bing.com
+safe.duckduckgo.com

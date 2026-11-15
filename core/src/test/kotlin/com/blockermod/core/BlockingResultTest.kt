@@ -13,9 +13,9 @@ class BlockingResultTest {
 
     @Test
     fun `blocked carries a reason`() {
-        val result = BlockingResult.Blocked(BlockReason.BLOCKLIST)
+        val result = BlockingResult.Blocked(BlockReason.BLOCKLIST_ADULT)
 
-        assertEquals(BlockReason.BLOCKLIST, result.reason)
+        assertEquals(BlockReason.BLOCKLIST_ADULT, result.reason)
     }
 
     @Test

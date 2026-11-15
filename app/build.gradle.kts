@@ -21,6 +21,11 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+
+    androidResources {
+        // The packed blocklist is mapped into the memory, so it must stay uncompressed.
+        noCompress += "bin"
+    }
 }
 
 kotlin {
@@ -33,4 +38,6 @@ dependencies {
     implementation(project(":core"))
     implementation(libs.androidx.core.ktx)
     implementation(libs.kotlinx.coroutines.android)
+
+    testImplementation(kotlin("test-junit"))
 }

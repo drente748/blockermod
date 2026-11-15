@@ -6,7 +6,7 @@
 
 ### Changed
 
-- أُزيل أي قيد مطلق على الاتصال بالإنترنت من الوثائق بالكامل: `README.md` و`ARCHITECTURE.md` و`PROGRESS.md` و`CONTRIBUTING.md` أصبحت تنص أن **سياسة الاتصال بالشبكة مفتوحة (غير محسومة)** — تُقرَّر لاحقًا حسب رغبة المطوّر؛ لا تمنع هذه البنية أي اتصال مستقبلي ولا تفرضه.
+- أُزيل أي قيد مطلق على الاتصال بالإنترنت من الوثائق بالكامل: `README.md` و`docs/ARCHITECTURE.md` و`PROGRESS.md` و`CONTRIBUTING.md` أصبحت تنص أن **سياسة الاتصال بالشبكة مفتوحة (غير محسومة)** — تُقرَّر لاحقًا حسب رغبة المطوّر؛ لا تمنع هذه البنية أي اتصال مستقبلي ولا تفرضه.
 - أُزيلت صيغة "Offline بالكامل" بالكامل من كل الملفات.
 - لا تغيّر في الكود أو المانيفست أو ملفات البناء.
 
@@ -20,7 +20,7 @@
 
 - وحدة **`:core`** مستقلة (`kotlin("jvm")`، `jvmToolchain(17)`) تحمل عقود الحظر فقط: `BlockingEngine` (`state`, `start()`, `stop()`, `evaluate(domain)`)، `BlockingResult`، `BlockReason`، `BlockingState`، و`DomainMatcher`.
 - اختبارات JVM في `:core` (`DomainMatcherTest`، `BlockingResultTest`) تعمل بلا جهاز ولا محاكي.
-- أقسام `ARCHITECTURE.md` الأربعة: DNS Encryption Policy، Socket Protection، Always-On Startup Path، Domain Matcher Abstraction.
+- أقسام `docs/ARCHITECTURE.md` الأربعة: DNS Encryption Policy، Socket Protection، Always-On Startup Path، Domain Matcher Abstraction.
 - `LICENSE` (Apache-2.0).
 - `jvmTarget` صريح (`JVM_17`) في `:app` و`:core` بدل الاشتقاق الضمني.
 - مانيفست: `SUPPORTS_ALWAYS_ON = true` لخدمة VPN، ونوع الخدمة `specialUse` مع خاصية subtype.
@@ -47,7 +47,7 @@
 - مضيف المحرك `platform.vpn.BlockerVpnService` كنقطة دخول معرَّفة في المانيفست بنوع خدمة أمامية `specialUse` وصلاحية `BIND_VPN_SERVICE`.
 - أذونات الشبكة والخدمة الأمامية وإشعارات الإصدارات ≥ 33.
 - `res/xml/data_extraction_rules.xml`: تعطيل النسخ الاحتياطي والنقل بين الأجهزة على الإصدارات ≥ 12.
-- توثيق: `README.md`، `ARCHITECTURE.md`، `PROGRESS.md`، `CONTRIBUTING.md`، `LICENSE`.
+- توثيق: `README.md`، `docs/ARCHITECTURE.md`، `PROGRESS.md`، `CONTRIBUTING.md`، `LICENSE`.
 - لغة التطبيق بالإنجليزية: الشيفرة والموارد والتسميات داخل `app`/`core`.
 
 ### Not included (deliberately)

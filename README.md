@@ -43,7 +43,7 @@
 2. **سياسة الاتصال مفتوحة**: لا قرار مسبقًا بشأن الاتصال بالإنترنت؛ تُقرَّر لاحقًا.
 3. **بلا إطار DI**: بناء يدوي وصريح، بلا انعكاس.
 4. **وحدتان باتجاه واحد**: `:app → :core`، ولا رجوع.
-5. **وضع تشغيل واحد**: انظر `ARCHITECTURE.md`.
+5. **وضع تشغيل واحد**: انظر `docs/ARCHITECTURE.md`.
 6. **قابل للاختبار**: منطق الحظر في `:core` Kotlin/JVM خالص، فيُختبر على الجهاز الحقيقي للمطور
    (JVM) بلا محاكي.
 7. **بلا انعكاس على داخليات النظام**: لا تعديل لحقول `static final` ولا وصول لحقول خاصة.
@@ -60,21 +60,36 @@ blockermod/
 ├── gradle.properties
 ├── gradlew / gradlew.bat
 ├── LICENSE                       # Apache-2.0
+├── .github/workflows/android.yml # البناء والاختبار وفحوص عقد الأداء
+├── docs/
+│   ├── ARCHITECTURE.md           # البنية والعقود وقرار الوضع الواحد
+│   ├── PERF_CONTRACT.md          # عقد الأداء R1-R11 وآليات فرضه
+│   ├── MANUAL_TESTS.md           # الاختبارات اليدوية وحدود النظام المعروفة
+│   ├── LICENSE_DECISIONS.md      # قرارات التراخيص لكل مصدر
+│   └── THIRD_PARTY_NOTICES.md    # إشعارات الأطراف الثالثة
+├── tools/                        # أدوات وقت البناء (لا تنزيل وقت التشغيل)
+│   ├── build-blocklist.sh        # بناء blocklist.bin مع بوابة ترخيص صارمة
+│   ├── build-safesearch.sh       # بناء جدول SafeSearch
+│   ├── sources.tsv               # المصادر المثبَّتة (commit + SHA-256 + قرار الترخيص)
+│   ├── supported-domains-google.txt  # لقطة نطاقات Google الرسمية
+│   ├── allowlist.txt             # نطاقات محمية لا تُحجب
+│   └── safesearch-hosts.txt      # مضيفو SafeSearch الذين لا يُحجبون
 ├── core/                         # Kotlin/JVM خالص — بلا Android
 │   ├── build.gradle.kts
 │   └── src/
-│       ├── main/kotlin/com/blockermod/core/   # BlockingEngine, BlockingResult, BlockReason, BlockingState, DomainMatcher
-│       └── test/kotlin/com/blockermod/core/   # اختبارات JVM للمطابقة والقرار
+│       ├── main/kotlin/com/blockermod/core/   # العقود والمحرّك والمحلّلات
+│       └── test/kotlin/com/blockermod/core/   # اختبارات JVM
 └── app/
     ├── build.gradle.kts          # إعدادات الوحدة: SDK، الإصدارات، الاعتماديات
     └── src/main/
-        ├── AndroidManifest.xml   # الأذونات + نقطة دخول المحرك (VpnService)
+        ├── AndroidManifest.xml    # الأذونات + نقطة دخول المحرك (VpnService)
+        ├── assets/                # blocklist.bin + blocklist.meta + safesearch.json
         ├── res/values/strings.xml
-        ├── res/xml/              # استثناء كامل من النسخ الاحتياطي ونقل البيانات
+        ├── res/xml/               # استثناء كامل من النسخ الاحتياطي ونقل البيانات
         └── java/com/blockermod/
-            ├── BlockermodApp.kt        # Application
+            ├── BlockermodApp.kt   # Application
             └── platform/
-                ├── vpn/BlockerVpnService.kt       # مضيف المحرك (بلا منطق بعد)
+                ├── vpn/           # BlockerVpnService, VpnTunnel, DnsResponder, UpstreamResolver, DnsCache, StrictResolverIps
                 ├── deviceowner/DeviceOwnerManager.kt  # عقد الوضع المستقبلي
                 └── applock/AppLockManager.kt          # عقد مستقبلي
 ```
@@ -84,7 +99,7 @@ blockermod/
 ## قضايا تشغيلية
 
 القضايا التي ستحدّد نجاح المحرك (موقف تشفير DNS، حماية المقابس، مسار الإقلاع دائم الاتصال، وتجريد
-مُطابِق النطاقات) موضّحة وحاسمة في `ARCHITECTURE.md` ضمن أقسام "DNS Encryption Policy"،
+مُطابِق النطاقات) موضّحة وحاسمة في `docs/ARCHITECTURE.md` ضمن أقسام "DNS Encryption Policy"،
 "Socket Protection"، "Always-On Startup Path" و"Domain Matcher Abstraction". تُحال عليها ولا
 تُكرَّر هنا.
 

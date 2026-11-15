@@ -3,7 +3,7 @@ package com.blockermod.platform.deviceowner
 /**
  * Contract for the device owner mode.
  *
- * Contracts only. Its presence does not mean the app runs in this mode: see ARCHITECTURE.md for
+ * Contracts only. Its presence does not mean the app runs in this mode: see docs/ARCHITECTURE.md for
  * why blocking runs in a single mode only.
  */
 interface DeviceOwnerManager {
