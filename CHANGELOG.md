@@ -2,6 +2,18 @@
 
 سجل زمني للتغييرات. كل جولة عمل تُسجَّل هنا.
 
+## Unreleased - Network policy left open
+
+### Changed
+
+- أُزيل أي قيد مطلق على الاتصال بالإنترنت من الوثائق بالكامل: `README.md` و`ARCHITECTURE.md` و`PROGRESS.md` و`CONTRIBUTING.md` أصبحت تنص أن **سياسة الاتصال بالشبكة مفتوحة (غير محسومة)** — تُقرَّر لاحقًا حسب رغبة المطوّر؛ لا تمنع هذه البنية أي اتصال مستقبلي ولا تفرضه.
+- أُزيلت صيغة "Offline بالكامل" بالكامل من كل الملفات.
+- لا تغيّر في الكود أو المانيفست أو ملفات البناء.
+
+### Verified
+
+- `./gradlew testDebugUnitTest lintDebug assembleDebug` — SUCCESS (انظر `PROGRESS.md`).
+
 ## Unreleased - Structural foundation hardening
 
 ### Added
