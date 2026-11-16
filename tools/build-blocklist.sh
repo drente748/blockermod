@@ -92,11 +92,11 @@ fi
 
 gate_licenses() {
     local blocked=0
-    local name url commit sha license decision approver date
+    local name url commit sha license decision approver date category
 
-    while IFS=$'\t' read -r name url commit sha license decision approver date || [ -n "${name:-}" ]; do
+    while IFS=$'\t' read -r name url commit sha license decision approver date category || [ -n "${name:-}" ]; do
         [ -z "${name:-}" ] && continue
-        case "${name}" in \#*) continue ;; esac
+        case "${name}" in \#*|name) continue ;; esac
 
         if [ "${decision:-}" != "auto-allowed" ]; then
             echo "license not cleared for ${name} (${url})" >&2
@@ -180,14 +180,16 @@ fetch_source() {
 
 CACHED_FILES=()
 SOURCE_NAMES=()
+CATEGORIES=()
 
-while IFS=$'\t' read -r name url commit sha license decision approver date || [ -n "${name:-}" ]; do
+while IFS=$'\t' read -r name url commit sha license decision approver date category || [ -n "${name:-}" ]; do
     [ -z "${name:-}" ] && continue
-    case "${name}" in \#*) continue ;; esac
+    case "${name}" in \#*|name) continue ;; esac
 
     file="$(fetch_source "${name}" "${url}" "${commit}" "${sha}")" || exit "${EXIT_FETCH}"
     CACHED_FILES+=("${file}")
     SOURCE_NAMES+=("${name}")
+    CATEGORIES+=("${category}")
 done < "${MANIFEST}"
 
 if [ "${#CACHED_FILES[@]}" -eq 0 ]; then
@@ -201,16 +203,18 @@ fi
 
 mkdir -p "${OUTPUT_DIR}"
 
-PACK_RESULT="$(python3 - "${OUTPUT_DIR}/blocklist.bin" "${ALLOWLIST}" "${SAFESEARCH_HOSTS}" "${CACHED_FILES[@]}" <<'PY'
+PACK_RESULT="$(python3 - "${OUTPUT_DIR}" "${ALLOWLIST}" "${SAFESEARCH_HOSTS}" "${#CACHED_FILES[@]}" "${CATEGORIES[@]}" "${CACHED_FILES[@]}" <<'PY'
 import ipaddress
 import json
 import os
 import sys
 
-output_path = sys.argv[1]
+output_dir = sys.argv[1]
 allowlist_path = sys.argv[2]
 safesearch_path = sys.argv[3]
-source_paths = sys.argv[4:]
+source_count = int(sys.argv[4])
+categories = sys.argv[5:5 + source_count]
+source_paths = sys.argv[5 + source_count:]
 
 
 def read_list(path):
@@ -258,74 +262,100 @@ def normalize(value):
 
 
 def extract_domains(path):
+    """Parses hosts-format lines (0.0.0.0 domain) and Adblock Plus rules (||domain^)."""
     domains = set()
     with open(path, "r", encoding="utf-8", errors="replace") as handle:
         for raw in handle:
             line = raw.strip()
-            if not line or line.startswith("#"):
+            if not line or line.startswith("#") or line.startswith("!") or line.startswith("["):
                 continue
-            fields = line.split()
-            if len(fields) >= 2 and is_address(fields[0]):
-                candidate = fields[1]
-            elif len(fields) == 1:
-                candidate = fields[0]
+            candidate = None
+            if line.startswith("||"):
+                # Adblock Plus: ||domain^  (optionally ||domain^$options)
+                rule = line[2:].split("$", 1)[0]
+                candidate = rule.split("^", 1)[0]
             else:
-                continue
-            domain = normalize(candidate)
-            if domain:
-                domains.add(domain)
+                fields = line.split()
+                if len(fields) >= 2 and is_address(fields[0]):
+                    candidate = fields[1]
+                elif len(fields) == 1:
+                    candidate = fields[0]
+            if candidate:
+                domain = normalize(candidate)
+                if domain:
+                    domains.add(domain)
     return domains
+
+
+def pack(domains):
+    """Drops child domains covered by a parent, packs reversed labels, returns (blob, count)."""
+    parents = set()
+    for domain in domains:
+        labels = domain.split(".")
+        for index in range(1, len(labels)):
+            parents.add(".".join(labels[index:]))
+    final = {domain for domain in domains if domain not in parents}
+
+    entries = []
+    for domain in final:
+        labels = reversed(domain.split("."))
+        entries.append("\u0000".join(labels).encode("ascii"))
+    entries.sort()
+
+    blob = bytearray()
+    for entry in entries:
+        blob += len(entry).to_bytes(2, "big")
+        blob += entry
+    return blob, len(entries)
 
 
 protected = read_list(allowlist_path) | read_list(safesearch_path)
 
-collected = set()
-for path in source_paths:
-    collected |= extract_domains(path)
+# Collect domains per category.
+per_category = {"adult": set(), "bypass": set(), "unsupported": set()}
+for category, path in zip(categories, source_paths):
+    bucket = per_category.get(category)
+    if bucket is None:
+        print("unknown category: " + category, file=sys.stderr)
+        sys.exit(3)
+    bucket |= extract_domains(path)
 
-collected -= protected
+# Protected domains are never blocked, in any list.
+for bucket in per_category.values():
+    bucket.difference_update(protected)
 
-# A name already covered by a parent name does not need its own entry.
-parents = set()
-for domain in collected:
-    labels = domain.split(".")
-    for index in range(1, len(labels)):
-        parents.add(".".join(labels[index:]))
+result = {}
+for category, bucket in per_category.items():
+    name = {"adult": "blocklist", "bypass": "bypass", "unsupported": "unsupported"}[category]
+    blob, count = pack(bucket)
+    with open(os.path.join(output_dir, name + ".bin"), "wb") as handle:
+        handle.write(blob)
+    result[name] = {"count": count, "bytes": len(blob)}
 
-final = {domain for domain in collected if domain not in parents}
-
-entries = []
-for domain in final:
-    labels = reversed(domain.split("."))
-    entries.append("\u0000".join(labels).encode("ascii"))
-
-entries.sort()
-
-blob = bytearray()
-for entry in entries:
-    blob += len(entry).to_bytes(2, "big")
-    blob += entry
-
-with open(output_path, "wb") as handle:
-    handle.write(blob)
-
-print(json.dumps({"count": len(entries), "bytes": len(blob)}))
+print(json.dumps(result))
 PY
 )" || exit "${EXIT_PARSE}"
 
-COUNT="$(printf '%s' "${PACK_RESULT}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["count"])')"
-HASH="$(sha256sum "${OUTPUT_DIR}/blocklist.bin" | cut -d' ' -f1)"
+COUNTS_JSON="${PACK_RESULT}"
 
-SOURCES_JSON="$(printf '%s\n' "${SOURCE_NAMES[@]}" | python3 -c 'import json,sys; print(json.dumps([line.strip() for line in sys.stdin if line.strip()]))')"
-
-cat > "${OUTPUT_DIR}/blocklist.meta" <<META
+write_meta() {
+    local name="$1" out="$2"
+    local count hash sources_json
+    count="$(printf '%s' "${COUNTS_JSON}" | python3 -c "import json,sys; print(json.load(sys.stdin)['${name}']['count'])")"
+    hash="$(sha256sum "${OUTPUT_DIR}/${out}.bin" | cut -d' ' -f1)"
+    sources_json="$(printf '%s\n' "${SOURCE_NAMES[@]}" | python3 -c 'import json,sys; print(json.dumps([line.strip() for line in sys.stdin if line.strip()]))')"
+    cat > "${OUTPUT_DIR}/${out}.meta" <<META
 {
-  "sources": ${SOURCES_JSON},
-  "count": ${COUNT},
-  "hash": "${HASH}"
+  "sources": ${sources_json},
+  "count": ${count},
+  "hash": "${hash}"
 }
 META
+    echo "wrote ${OUTPUT_DIR}/${out}.bin with ${count} entries" >&2
+    echo "sha256 ${hash}" >&2
+}
 
-echo "wrote ${OUTPUT_DIR}/blocklist.bin with ${COUNT} entries" >&2
-echo "sha256 ${HASH}" >&2
+write_meta blocklist blocklist
+write_meta bypass bypass
+write_meta unsupported unsupported
 exit "${EXIT_OK}"

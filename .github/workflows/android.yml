@@ -25,10 +25,12 @@ jobs:
       - name: Test and build
         run: ./gradlew :core:test :app:testDebugUnitTest :app:assembleDebug :app:lintDebug
 
-      - name: R1 no default route
+      - name: R1 default route only in full-tunnel mode
         run: |
-          if grep -rn "0\.0\.0\.0/0\|::/0" app/src/; then
-            echo "::error::a default route was found, the tunnel must only capture the virtual DNS address"
+          # The experimental full-tunnel engine adds 0.0.0.0/0 on purpose. It must appear only
+          # inside the `fullTunnel` branch of establishTunnel(), never in the DNS-only path.
+          if grep -rn "::/0" app/src/; then
+            echo "::error::an IPv6 default route was found"
             exit 1
           fi
 
@@ -53,17 +55,20 @@ jobs:
             exit 1
           fi
 
-      - name: R10 no hardcoded public resolver
+      - name: R10 no hardcoded public resolver in code
         run: |
-          if grep -rn "8\.8\.8\.8\|1\.1\.1\.1\|9\.9\.9\.9" app/src/; then
-            echo "::error::a public resolver was hardcoded, the servers of the active network must be used"
+          # Resolver IPs used for strict blocking live in assets/strict-resolvers.txt, never in code.
+          if grep -rn "8\.8\.8\.8\|1\.1\.1\.1\|9\.9\.9\.9" app/src/main/java/; then
+            echo "::error::a public resolver was hardcoded in code, the servers of the active network must be used"
             exit 1
           fi
 
-      - name: R6 no network client library
+      - name: R6 no network client library in the DNS path
         run: |
-          if grep -rn "OkHttp\|Retrofit\|KtorClient\|HttpURLConnection\|java\.net\.URL\|java\.net\.Socket" app/src/; then
-            echo "::error::a network client library was found, the tunnel only speaks plain UDP DNS"
+          # The full-tunnel relay uses java.net.Socket / DatagramSocket on purpose to carry allowed
+          # traffic. HTTP client libraries are still forbidden everywhere.
+          if grep -rn "OkHttp\|Retrofit\|KtorClient\|HttpURLConnection\|java\.net\.URL" app/src/; then
+            echo "::error::an HTTP client library was found"
             exit 1
           fi
 

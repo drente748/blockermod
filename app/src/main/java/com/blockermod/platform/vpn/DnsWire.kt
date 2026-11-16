@@ -14,11 +14,34 @@ internal object DnsWire {
     /** Size of the DNS header in bytes. */
     private const val HEADER_SIZE: Int = 12
 
+    /** Result code: no error. */
+    const val RCODE_NOERROR: Int = 0
+
+    /** Result code: server failure (upstream unreachable or malformed response). */
+    const val RCODE_SERVFAIL: Int = 2
+
+    /** Result code: name error (the queried name does not exist). */
+    const val RCODE_NXDOMAIN: Int = 3
+
+    /** An upstream lookup result: the response code and the answer records. */
+    class Answer(val rcode: Int, val records: List<DnsRecord>)
+
     /** Maximum number of compression pointer hops followed while resolving a name. */
     private const val MAX_POINTER_HOPS: Int = 10
 
     /** Maximum length of a single label in bytes. */
     private const val MAX_LABEL_LENGTH: Int = 63
+
+    /** Record types whose RDATA starts with one or more domain names. */
+    private const val TYPE_NS: Int = 2
+    private const val TYPE_CNAME: Int = 5
+    private const val TYPE_SOA: Int = 6
+    private const val TYPE_PTR: Int = 12
+    private const val TYPE_MX: Int = 15
+    private const val TYPE_OPT: Int = 41
+
+    /** EDNS(0) UDP payload size: fits in a 1280-byte IPv6 frame without fragmentation. */
+    const val EDNS_PAYLOAD_SIZE: Int = 1232
 
     /**
      * Encodes a domain name in wire format: length prefixed labels followed by the root label.
@@ -46,16 +69,30 @@ internal object DnsWire {
 
         writeU16(out, id)
         writeU16(out, 0x0100)
-        writeU16(out, 1)
-        writeU16(out, 0)
-        writeU16(out, 0)
-        writeU16(out, 0)
+        writeU16(out, 1) // QDCOUNT
+        writeU16(out, 0) // ANCOUNT
+        writeU16(out, 0) // NSCOUNT
+        writeU16(out, 1) // ARCOUNT: one OPT pseudo-RR (RFC 6891)
         out.write(encodeName(name))
         writeU16(out, type)
-        writeU16(out, 1)
+        writeU16(out, 1) // class IN
+
+        // EDNS(0): advertise a 1232-byte UDP payload, which fits in a 1280-byte IPv6 frame and
+        // avoids IP fragmentation (a leading cause of DNS retries over TCP and battery drain).
+        out.write(0) // root name
+        writeU16(out, TYPE_OPT)
+        writeU16(out, EDNS_PAYLOAD_SIZE)
+        writeU32(out, 0) // extended rcode + flags
+        writeU16(out, 0) // RDLEN
 
         return out.toByteArray()
     }
+
+    /**
+     * Reads the response code from a DNS response header.
+     */
+    fun responseRcode(packet: ByteArray): Int =
+        if (packet.size >= HEADER_SIZE) readU16(packet, 2) and 0x0F else RCODE_SERVFAIL
 
     /**
      * Parses the answer records of a DNS response.
@@ -91,12 +128,45 @@ internal object DnsWire {
 
             if (cursor + dataLength > packet.size) return emptyList()
 
-            records.add(DnsRecord(owner.text, type, klass, ttl, packet.copyOfRange(cursor, cursor + dataLength)))
+            val data = normalizeRdata(packet, cursor, dataLength, type) ?: return emptyList()
+            records.add(DnsRecord(owner.text, type, klass, ttl, data))
             cursor += dataLength
             offset = cursor
         }
 
         return records
+    }
+
+    /**
+     * Rewrites compression pointers inside name-bearing RDATA as plain names, so the record can be
+     * copied into a new response without pointing at the wrong offsets. A pointer in the upstream
+     * message is relative to that message, not to the response we build, so copying it verbatim
+     * would corrupt the answer. Other RDATA (A, AAAA, TXT, ...) contains no pointers and is copied as
+     * is. Malformed name-bearing records are rejected.
+     */
+    private fun normalizeRdata(packet: ByteArray, start: Int, length: Int, type: Int): ByteArray? {
+        val end = start + length
+        return when (type) {
+            TYPE_CNAME, TYPE_NS, TYPE_PTR -> {
+                val name = readName(packet, start) ?: return null
+                if (name.nextOffset > end) return null
+                encodeName(name.text)
+            }
+            TYPE_MX -> {
+                if (length < 3) return null
+                val name = readName(packet, start + 2) ?: return null
+                if (name.nextOffset > end) return null
+                packet.copyOfRange(start, start + 2) + encodeName(name.text)
+            }
+            TYPE_SOA -> {
+                val primary = readName(packet, start) ?: return null
+                val admin = readName(packet, primary.nextOffset) ?: return null
+                if (admin.nextOffset + 20 > end) return null
+                encodeName(primary.text) + encodeName(admin.text) +
+                    packet.copyOfRange(admin.nextOffset, end)
+            }
+            else -> packet.copyOfRange(start, end)
+        }
     }
 
     /**

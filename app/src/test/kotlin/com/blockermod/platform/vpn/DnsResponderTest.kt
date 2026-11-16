@@ -27,7 +27,7 @@ class DnsResponderTest {
     @Test
     fun `an allowed domain is answered from the upstream`() {
         val upstream = FakeUpstream(
-            mapOf("ok.example/1" to listOf(DnsRecord("ok.example", DnsTypes.A, 1, 60, byteArrayOf(10, 0, 0, 1)))),
+            mapOf("ok.example/1" to listOf(DnsRecord("ok.example", DnsTypes.A, 1, 60, byteArrayOf(93.toByte(), 184.toByte(), 216.toByte(), 34.toByte())))),
         )
         val responder = responder(upstream = upstream)
 
@@ -43,7 +43,7 @@ class DnsResponderTest {
         val upstream = FakeUpstream(
             mapOf(
                 "forcesafesearch.google.com/1" to
-                    listOf(DnsRecord("forcesafesearch.google.com", DnsTypes.A, 1, 60, byteArrayOf(10, 0, 0, 1))),
+                    listOf(DnsRecord("forcesafesearch.google.com", DnsTypes.A, 1, 60, byteArrayOf(93.toByte(), 184.toByte(), 216.toByte(), 34.toByte()))),
             ),
         )
         val responder = responder(
@@ -92,9 +92,56 @@ class DnsResponderTest {
     }
 
     @Test
+    fun `an upstream name error is forwarded as a name error`() {
+        val nxdomain = object : DnsUpstream {
+            override fun lookup(host: String, type: Int) =
+                DnsWire.Answer(DnsWire.RCODE_NXDOMAIN, emptyList())
+        }
+        val response = responder(upstream = nxdomain)
+            .respond(DnsWire.buildQuery(0x7777, "missing.example", DnsTypes.A))
+
+        assertNotNull(response)
+        assertEquals(3, readU16(response, 2) and 0x0F)
+    }
+
+    @Test
+    fun `a CNAME cloaking an adult domain is blocked`() {
+        val cloaking = object : DnsUpstream {
+            override fun lookup(host: String, type: Int): DnsWire.Answer {
+                val cname = DnsRecord(
+                    "clean.example", DnsTypes.CNAME, 1, 60,
+                    DnsWire.encodeName("www.pornhub.com"),
+                )
+                return DnsWire.Answer(DnsWire.RCODE_NOERROR, listOf(cname))
+            }
+        }
+        val response = responder(
+            upstream = cloaking,
+            adultBlocklist = setOf("www.pornhub.com"),
+        ).respond(DnsWire.buildQuery(0x9999, "clean.example", DnsTypes.A))
+
+        assertNotNull(response)
+        assertEquals(3, readU16(response, 2) and 0x0F)
+    }
+
+    @Test
+    fun `an upstream no data answer is forwarded as no data`() {
+        val nodata = object : DnsUpstream {
+            override fun lookup(host: String, type: Int) =
+                DnsWire.Answer(DnsWire.RCODE_NOERROR, emptyList())
+        }
+        val response = responder(upstream = nodata)
+            .respond(DnsWire.buildQuery(0x8888, "existing.example", DnsTypes.AAAA))
+
+        assertNotNull(response)
+        assertEquals(0, readU16(response, 2) and 0x0F)
+        assertEquals(0, readU16(response, 6))
+    }
+
+    @Test
     fun `the log only mode forwards the query and records the decision`() {
         val upstream = FakeUpstream(
-            mapOf("adult.example/1" to listOf(DnsRecord("adult.example", DnsTypes.A, 1, 60, byteArrayOf(10, 0, 0, 1)))),
+            mapOf("adult.example/1" to listOf(DnsRecord("adult.example", DnsTypes.A, 1, 60, byteArrayOf(93.toByte(), 184.toByte(), 216.toByte(), 34.toByte())))),
         )
         val responder = responder(
             upstream = upstream,
@@ -113,7 +160,7 @@ class DnsResponderTest {
     private fun responder(
         adultBlocklist: Set<String> = emptySet(),
         safeSearchTable: com.blockermod.core.policy.SafeSearchTable = InMemorySafeSearchTable(emptyMap()),
-        upstream: FakeUpstream = FakeUpstream(emptyMap()),
+        upstream: DnsUpstream = FakeUpstream(emptyMap()),
         logOnly: Boolean = false,
     ): DnsResponder = DnsResponder(
         policy = PolicyEngine(
@@ -124,6 +171,7 @@ class DnsResponderTest {
             safeSearchTable = safeSearchTable,
         ),
         upstream = upstream,
+        cache = DnsCache(),
         logOnly = logOnly,
     )
 
@@ -131,9 +179,12 @@ class DnsResponderTest {
 
         val requestedHosts: MutableList<String> = mutableListOf()
 
-        override fun lookup(host: String, type: Int): List<DnsRecord> {
+        override fun lookup(host: String, type: Int): DnsWire.Answer {
             requestedHosts.add(host)
-            return answers["$host/$type"] ?: emptyList()
+            return DnsWire.Answer(
+                DnsWire.RCODE_NOERROR,
+                answers["$host/$type"] ?: emptyList(),
+            )
         }
     }
 

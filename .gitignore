@@ -10,5 +10,6 @@ captures/
 .cxx/
 *.apk
 *.aab
+tools/cache/
 *.keystore
 *.jks

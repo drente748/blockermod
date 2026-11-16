@@ -1,25 +1,37 @@
 # إشعارات الأطراف الثالثة
 
-هذا الملف هو القالب الذي يُملأ بعد كل بناء حقيقي لـ `blocklist.bin`. في كل صف: اسم المصدر، رابطه،
+هذا الملف يسجّل مصادر قوائم الحظر المبنية في التطبيق. في كل صف: اسم المصدر، رابطه،
 commit المستخدم، ترخيصه، عدد النطاقات المساهمة، وبصمة الملف الناتج.
 
-**الحالة الراهنة: لم يُستخدم أي مصدر حقيقي بعد.** الملف الحالي في التطبيق هو عنصر نائب (fixture)
-لاختبار الصيغة فقط، ولا يمثّل قائمة حظر حقيقية ولا يُشحن.
+**الحالة الراهنة: قوائم حقيقية مبنية ومشمولة في التطبيق.**
 
-| الاسم | URL | commit | الترخيص | عدد النطاقات | بصمة الملف |
-|---|---|---|---|---|---|
-| PLACEHOLDER | — | — | PENDING VERIFICATION | 100 | cae7a9558d8483fb8e5465273d2d4028f6c1e6ac978801345df45d86e12ce38b |
+## blocklist.bin — حظر الإباحية (181,565 نطاقًا)
 
-## كيف يُملأ
+| الاسم | URL | commit | الترخيص |
+|---|---|---|---|
+| StevenBlack/hosts (porn) | https://github.com/StevenBlack/hosts | ce25ce24d6dca08fa484612091a822bc93587086 | MIT |
+| StevenBlack/hosts (porn-only) | https://github.com/StevenBlack/hosts | ce25ce24d6dca08fa484612091a822bc93587086 | MIT |
+| Potterfanz/Stricter-porn-blocklist | https://github.com/Potterfanz/Stricter-porn-blocklist | c7b8e375a0491f040d34f018a1cbb74edc188981 | MIT |
+| HaGeZi NSFW | https://github.com/hagezi/dns-blocklists | 071064f08e7b2a39d59e0bf221de3c54555d2486 | GPL-3.0 (بيانات) |
 
-- اسم المصدر كما في `tools/sources.tsv`.
-- رابط المصدر وcommit SHA المحدد (لا فرع متحرك).
-- الترخيص كما تم تسجيله في `docs/LICENSE_DECISIONS.md` (والقرار `auto-allowed`).
-- عدد النطاقات المستخدَمة من هذا المصدر.
-- بصمة SHA-256 لملف `blocklist.bin` الناتج عن البناء كاملًا.
+## bypass.bin — محاولات الالتفاف / DNS مشفر (16,458 نطاقًا)
 
-## ملاحظات إلزامية في كل إشعار
+| الاسم | URL | commit | الترخيص |
+|---|---|---|---|
+| HaGeZi DoH/VPN/Proxy Bypass | https://github.com/hagezi/dns-blocklists | 071064f08e7b2a39d59e0bf221de3c54555d2486 | GPL-3.0 (بيانات) |
 
-- ذكر أن المصدر مستخدم لقائمة الحظر داخل التطبيق.
-- ذكر أن المصدر مستخدم «كما هو» بلا تعديل على محتواه.
-- ذكر أي التزام بالإسناد يفرضه الترخيص.
+## unsupported.bin — محركات بحث لا تدعم SafeSearch (202 نطاقًا)
+
+| الاسم | URL | commit | الترخيص |
+|---|---|---|---|
+| HaGeZi NoSafeSearch | https://github.com/hagezi/dns-blocklists | 071064f08e7b2a39d59e0bf221de3c54555d2486 | GPL-3.0 (بيانات) |
+
+> المصادر مستخدمة لقوائم الحظر داخل التطبيق، «كما هي» بعد التطبيع والإزالة الآلية فقط.
+>
+> **StevenBlack/hosts:** Copyright © 2026 Steven Black — MIT License.
+> **Potterfanz/Stricter-porn-blocklist:** MIT License.
+> **HaGeZi DNS Blocklists:** Copyright © hagezi — GNU General Public License v3.0. تُدمج قوائمه
+> كبيانات نطاقات فقط في أصول `.bin` منفصلة عن كود التطبيق (Apache-2.0)، مع هذا الإسناد الكامل.
+> النص الكامل لترخيص GPL-3.0 متاح في المستودع: https://www.gnu.org/licenses/gpl-3.0.html
+>
+> البصمات (SHA-256) وعدد المدخلات لكل ملف في `app/src/main/assets/*.meta`.

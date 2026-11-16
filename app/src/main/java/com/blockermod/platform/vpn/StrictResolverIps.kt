@@ -1,61 +1,61 @@
 package com.blockermod.platform.vpn
 
+import android.content.Context
 import java.net.InetAddress
 
 /**
- * Addresses of the strict resolvers that may be routed through the tunnel.
+ * Encrypted-resolver addresses routed into the tunnel so their DoT/DoH cannot bypass the filter.
  *
- * The feature is **disabled by default**: it routes a second set of addresses into the tunnel and
- * drops every port but 53 for them, which keeps the encrypted resolvers from bypassing the
- * blocking. Routing more addresses into the tunnel costs battery, because the tunnel has to read
- * and answer more packets; the cost is only worth it when the strict resolvers are actually used.
- *
- * The address list stays empty until the license of the sources is cleared, see
- * `docs/LICENSE_DECISIONS.md`. While the list is empty the feature has no effect whatever the
- * switch says.
+ * The addresses are loaded from the `strict-resolvers.txt` asset once at startup; no IP is hardcoded
+ * in source and no hostname is resolved. Routing them costs battery (the tunnel reads and drops
+ * more packets than it answers), but it is the only way for an ordinary installed app to stop
+ * encrypted DNS to resolvers the user did not choose. System Private DNS pointed at a custom host
+ * still needs the user to turn it off; the interface warns when that is detected.
  */
 internal object StrictResolverIps {
 
-    /** Master switch of the feature; disabled by default. */
-    const val STRICT_RESOLVER_IPS_ENABLED: Boolean = false
+    /** Master switch of the feature; kept for callers that do not have a Context. */
+    const val STRICT_RESOLVER_IPS_ENABLED: Boolean = true
 
-    /**
-     * Addresses routed through the tunnel when the feature is on.
-     *
-     * Empty until the license decision is taken.
-     */
-    val STRICT_RESOLVER_IPS: List<String> = emptyList()
+    @Volatile
+    private var enabled: Boolean = true
 
-    /**
-     * Ports dropped for those addresses: encrypted DNS over TLS and DNS over HTTPS.
-     *
-     * Only the plain DNS port stays allowed.
-     */
-    val DROPPED_PORTS: Set<Int> = setOf(853, 443)
-
-    private val addresses: Set<Int> by lazy {
-        STRICT_RESOLVER_IPS.mapNotNull { literal(it) }.toSet()
+    /** Applies the user preference. Disabled means no routes are added. */
+    fun setEnabled(value: Boolean) {
+        enabled = STRICT_RESOLVER_IPS_ENABLED && value
     }
 
-    /**
-     * Routes to add to the tunnel interface; empty while the feature is off.
-     */
-    fun routes(): List<String> =
-        if (STRICT_RESOLVER_IPS_ENABLED) STRICT_RESOLVER_IPS else emptyList()
+    /** Ports dropped for those addresses: DNS over TLS and DNS over HTTPS. */
+    val DROPPED_PORTS: Set<Int> = setOf(853, 443)
 
-    /**
-     * True when the destination address is one of the strict resolvers and the feature is on.
-     */
+    @Volatile
+    private var routesList: List<String> = emptyList()
+
+    @Volatile
+    private var addresses: Set<Int> = emptySet()
+
+    /** Loads the address list from the asset. Must be called before the tunnel starts. */
+    fun initialize(context: Context) {
+        if (!STRICT_RESOLVER_IPS_ENABLED || routesList.isNotEmpty()) return
+        val loaded = AssetRules.readStrictResolvers(context)
+        routesList = loaded
+        addresses = loaded.mapNotNull { literal(it) }.toSet()
+    }
+
+    /** Routes to add to the tunnel interface. */
+    fun routes(): List<String> = if (enabled) routesList else emptyList()
+
+    /** True when the destination is a strict resolver and the feature is on. */
     fun isStrictResolver(destinationAddress: Int): Boolean =
-        STRICT_RESOLVER_IPS_ENABLED && addresses.contains(destinationAddress)
+        enabled && addresses.contains(destinationAddress)
 
-    /**
-     * True when the port must be dropped for the strict resolvers.
-     */
+    /** True when the port must be dropped for strict resolvers. */
     fun isDroppedPort(port: Int): Boolean = DROPPED_PORTS.contains(port)
 
     private fun literal(value: String): Int? = try {
-        InetAddress.getByName(value).address.fold(0) { accumulator, byte -> (accumulator shl 8) or (byte.toInt() and 0xFF) }
+        InetAddress.getByName(value).address.fold(0) { accumulator, byte ->
+            (accumulator shl 8) or (byte.toInt() and 0xFF)
+        }
     } catch (exception: java.net.UnknownHostException) {
         null
     }

@@ -37,11 +37,7 @@
             android:name=".ui.OnboardingActivity"
             android:exported="false" />
 
-        <!--
-          The blocking engine is a VpnService. The declaration below is the product entry point;
-          the tunnel, the resolver and the rule matcher are implemented in a later phase
-          (see PROGRESS.md).
-        -->
+        <!-- The blocking engine: a VpnService hosting the DNS tunnel and the rule matcher. -->
         <service
             android:name=".platform.vpn.BlockerVpnService"
             android:exported="true"

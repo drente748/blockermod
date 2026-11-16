@@ -1,0 +1,5 @@
+# Domains the user owns or explicitly protects. They are never blocked.
+# One domain per line, comments start with a hash.
+
+example.org
+example.net

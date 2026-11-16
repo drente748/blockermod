@@ -7,7 +7,8 @@ import com.blockermod.R
 import com.blockermod.platform.vpn.AppSettings
 
 /**
- * The settings screen: the safe search switch and the reserved strict resolver switch.
+ * The settings screen: safe search and strict resolver controls. Both are read when the service
+ * starts, so a change takes effect after protection is restarted.
  */
 class SettingsActivity : Activity() {
 
@@ -26,6 +27,12 @@ class SettingsActivity : Activity() {
         strictResolver.isChecked = AppSettings.strictResolverEnabled(this)
         strictResolver.setOnCheckedChangeListener { _, checked ->
             AppSettings.setStrictResolverEnabled(this, checked)
+        }
+
+        val fullTunnel = findViewById<Switch>(R.id.fullTunnelSwitch)
+        fullTunnel.isChecked = AppSettings.fullTunnelEnabled(this)
+        fullTunnel.setOnCheckedChangeListener { _, checked ->
+            AppSettings.setFullTunnelEnabled(this, checked)
         }
     }
 }

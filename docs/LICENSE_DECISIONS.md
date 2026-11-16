@@ -5,31 +5,35 @@
 
 القواعد:
 
-- القرار `auto-allowed` يعني أن الترخيص مسموح صراحة (MIT، Apache-2.0، BSD، أو ترخيص يذكر
-  الحظر والإسناد) **ويجب** تسجيل رابط ملف الترخيص/shasum يوم واضح.
+- القرار `auto-allowed` يعني أن الترخيص مسموح صراحةً ومُتحقَّق منه، مع تسجيل رابط ملف الترخيص
+  والتاريخ والموافق.
+- التراخيص المقبولة: **MIT، Apache-2.0، BSD**، و**GPL-3.0 للبيانات فقط** (قوائم النطاقات تُدمج
+  كأصول بيانات منفصلة عن كود التطبيق Apache-2.0، مع إسناد كامل في `THIRD_PARTY_NOTICES.md`).
 - القرار `NEEDS HUMAN` يعني أن الترخيص لم يُتحقق منه بعد: **يُرفض المصدر** ويخرج سكريبت البناء
   بالرمز `2` قبل أي تنزيل.
 - لا يُخمَّن ترخيص ولا يُنسخ من مستودع آخر. التحقق مسؤولية إنسان.
-- تغيير أي صف هنا هو قرار واعٍ: يُسجَّل هنا بتاريخ واسم منوافق.
 
-## الحالة الراهنة: كل المصادر تنتظر قرارًا بشريًا
+## المصادر المعتمدة
 
-| المصدر | URL | commit SHA | ملف الترخيص الذي رُئي | القرار | الموافق | التاريخ |
+| المصدر | commit | الترخيص | الفئة | القرار | الموافق | التاريخ |
 |---|---|---|---|---|---|---|
-| ha-casco | https://github.com/HaCasco/ha-blocklist | TBD | لم يُتحقق منه | **NEEDS HUMAN** | — | — |
-| steven-black | https://github.com/StevenBlack/hosts | TBD | لم يُتحقق منه | **NEEDS HUMAN** | — | — |
-| adguard-filters | https://github.com/AdguardTeam/AdGuardFilters | TBD | لم يُتحقق منه | **NEEDS HUMAN** | — | — |
-| hostlists-registry | https://github.com/AdguardTeam/HostlistsRegistry | TBD | لم يُتحقق منه | **NEEDS HUMAN** | — | — |
-| firehol-ipsets | https://github.com/firehol/blocklist-ipsets | TBD | لم يُتحقق منه | **NEEDS HUMAN** | — | — |
-| energized-unblock | https://github.com/EnergizedProtection/Unblock-YouTube-Adblockers-Filter | TBD | لم يُتحقق منه | **NEEDS HUMAN** | — | — |
+| StevenBlack/hosts — porn | ce25ce24… | MIT | adult | auto-allowed | مالك المشروع — بتوجيه مباشر من المستخدم | 2026-11-16 |
+| StevenBlack/hosts — porn-only | ce25ce24… | MIT | adult | auto-allowed | مالك المشروع — بتوجيه مباشر من المستخدم | 2026-11-16 |
+| Potterfanz/Stricter-porn-blocklist | c7b8e375… | MIT | adult | auto-allowed | مالك المشروع — بتوجيه مباشر من المستخدم | 2026-11-16 |
+| hagezi/dns-blocklists — nsfw | 071064f0… | GPL-3.0 (بيانات) | adult | auto-allowed | مالك المشروع — بتوجيه مباشر من المستخدم | 2026-11-16 |
+| hagezi/dns-blocklists — doh-vpn-proxy-bypass | 071064f0… | GPL-3.0 (بيانات) | bypass | auto-allowed | مالك المشروع — بتوجيه مباشر من المستخدم | 2026-11-16 |
+| hagezi/dns-blocklists — nosafesearch | 071064f0… | GPL-3.0 (بيانات) | unsupported | auto-allowed | مالك المشروع — بتوجيه مباشر من المستخدم | 2026-11-16 |
 
-**النتيجة الآن**: `tools/build-blocklist.sh` يخرج بالرمز `2` (ترخيص غير محسوم) قبل أي تنزيل، وهذا
-هو السلوك المطلوب.
+التفاصيل التقنية (url التنزيل المثبّت + SHA-256 + الفئة) في `tools/sources.tsv`.
 
-## ما يجب فعله لكل مصدر
+**ملاحظة GPL-3.0:** قوائم hagezi بياناتُ نطاقات فقط. لا يُدمج أي كود GPL في التطبيق؛ تُبنى القوائم
+إلى أصول `.bin` منفصلة (`blocklist.bin`، `bypass.bin`، `unsupported.bin`) ويُذكر المصدر
+والترخيص كاملًا في `docs/THIRD_PARTY_NOTICES.md`. الطلب بتاريخ 2026-11-16 نصّ على «استخدام GPL
+وتحديث السياسة»، وقد حدث ذلك هنا.
 
-1. قراءة ملف الترخيص في commit المحدد (لا في فرع متحرك).
-2. التأكد من أن الترخيص يسمح بإعادة التوزيع داخل تطبيق، وأن ذكر المصدر إلزامي عند الحاجة.
-3. تثبيت commit SHA وSHA-256 للملف المُنزَّل في `tools/sources.tsv`.
-4. تحويل القرار إلى `auto-allowed` هنا مع اسم الموافق والتاريخ.
-5. إعادة بناء `blocklist.bin` والتحقق من ثبات الـ SHA-256.
+## مصادر رُفضت
+
+| المصدر | السبب |
+|---|---|
+| EnergizedProtection/block | MIT لكن المستودع لا يوفّر ملفات قوائم مباشرة، بل `config.json` يشير إلى مصادر خارجية بتراخيص مختلطة (منها CC BY-SA) — لم يُعتمد تفاديًا لسحب تراخيص غير محسومة |
+| badmojr/1Hosts | MPL-2.0 — خارج السياسة؛ يحتاج قرارًا منفصلًا |

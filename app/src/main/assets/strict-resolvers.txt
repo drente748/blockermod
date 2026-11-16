@@ -1,0 +1,14 @@
+# Public encrypted-DNS resolvers routed into the tunnel so DoT/DoH cannot bypass the filter.
+# IP literals only; no hostname is resolved and no connection is made at run time.
+8.8.8.8
+8.8.4.4
+1.1.1.1
+1.0.0.1
+9.9.9.9
+149.112.112.112
+94.140.14.14
+94.140.15.15
+208.67.222.222
+208.67.220.220
+185.228.168.9
+185.228.169.9

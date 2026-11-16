@@ -25,7 +25,7 @@ import kotlinx.coroutines.launch
  */
 class MainActivity : Activity() {
 
-    private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+    private var scope: CoroutineScope? = null
 
     private lateinit var stateLabel: TextView
     private lateinit var counterLabel: TextView
@@ -52,14 +52,17 @@ class MainActivity : Activity() {
 
     override fun onStart() {
         super.onStart()
-        scope.launch {
-            EngineStatus.state.collect { render(it) }
+        scope = CoroutineScope(Dispatchers.Main + SupervisorJob()).also { active ->
+            active.launch {
+                EngineStatus.state.collect { render(it) }
+            }
         }
         refreshCounter()
     }
 
     override fun onStop() {
-        scope.cancel()
+        scope?.cancel()
+        scope = null
         super.onStop()
     }
 

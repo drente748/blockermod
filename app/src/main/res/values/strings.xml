@@ -22,7 +22,10 @@
 
     <string name="safe_search_label">Safe search</string>
     <string name="strict_resolver_label">Strict resolver addresses</string>
-    <string name="strict_resolver_hint">Reserved: the resolver list stays empty until the license decision is taken.</string>
+    <string name="strict_resolver_hint">Blocks encrypted DNS to known resolvers. Restart protection to apply changes.</string>
+
+    <string name="full_tunnel_label">Full tunnel (experimental)</string>
+    <string name="full_tunnel_hint">Captures all IPv4 traffic to stop DoH by name and port. Uses more battery. Restart protection to apply.</string>
 
     <string name="onboarding_restricted_settings_title">Allow restricted settings (Android 13 and newer)</string>
     <string name="onboarding_restricted_settings_body">Open the system settings, choose Apps, then BlockerMod, then Allow restricted settings. Without it the system refuses to start the protection on its own after a reboot.</string>

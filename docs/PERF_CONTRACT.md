@@ -9,12 +9,12 @@
 
 | # | القاعدة | آلية الفرض | الملف |
 |---|---|---|---|
-| R1 | النفق يلتقط عنوان DNS الافتراضي فقط بمسار `/32`؛ ممنوع `0.0.0.0/0` و`::/0` | كود + `grep` في CI | `app/src/main/java/com/blockermod/platform/vpn/BlockerVpnService.kt` |
+| R1 | الوضع الافتراضي: نفق DNS بمسار `/32`. الوضع التجريبي «Full tunnel» يضيف `0.0.0.0/0` لالتقاط كل IPv4 | كود + إعداد مستخدم | `BlockerVpnService.kt`، `AppSettings.kt` |
 | R2 | الخدمة الأمامية معلنة بنوع صريح مع صلاحية `BIND_VPN_SERVICE` و`SUPPORTS_ALWAYS_ON` | كود + فحص `lint` | `app/src/main/AndroidManifest.xml` |
 | R3 | لا استهلاك معالج أثناء الانتظار: القراءة محجوبة (`setBlocking(true)`) والخيط ينتظر على `CountDownLatch` | كود + اختبار وحدة + `grep` (لا `sleep`) | `app/src/main/java/com/blockermod/platform/vpn/VpnTunnel.kt` |
 | R4 | بلا آليات جدولة أو إيقاظ: لا `WakeLock` ولا `AlarmManager` ولا `WorkManager` ولا `Timer` ولا `ScheduledExecutor` ولا `postDelayed` | `grep` في CI | `app/src/main/java/com/blockermod/platform/vpn/` |
 | R5 | بلا وصول عميق لتطبيقات أخرى: لا `AccessibilityService` ولا `UsageStatsManager` | `grep` في CI | `app/src/` |
-| R6 | كل مقبس صادر يُربط بالشبكة الفيزيائية **قبل** `connect`، فلا يعود إلى النفق | كود (نقطة الحقن `SocketBinder`) | `app/src/main/java/com/blockermod/platform/vpn/UpstreamResolver.kt` |
+| R6 | كل مقبس صادر يُربط بالشبكة الفيزيائية **قبل** `connect`، وخوادم upstream تُقرأ من شبكة `NOT_VPN` فقط | كود (نقطة الحقن `SocketBinder` + `NetworkRequest`) | `app/src/main/java/com/blockermod/platform/vpn/UpstreamResolver.kt`، `BlockerVpnService.kt` |
 | R7 | خيوط محدودة: خيط قراءة واحد، 8 خيوط عمل، 1024 طلب معلّق كحد أقصى، مهلة upstream 4 ثوانٍ | كود (ثوابت) + اختبار وحدة | `app/src/main/java/com/blockermod/platform/vpn/VpnTunnel.kt` |
 | R8 | ذاكرة مخبأة: LRU بسعة قصوى 512، ومدة حياة مقصوصة بين 30 و300 ثانية، للإجابات المسموحة فقط | كود + اختبار وحدة | `app/src/main/java/com/blockermod/platform/vpn/DnsCache.kt` |
 | R9 | الـ upstream هو DNS عادي (Do53) إلى خوادم الشبكة النشطة فقط، بلا fallback عام | كود + `grep` (بلا خوادم ثابتة) | `app/src/main/java/com/blockermod/platform/vpn/UpstreamResolver.kt` |
@@ -30,14 +30,21 @@
   بلا تنسيق نصوص داخل مسار الحزم، والتنسيق يحدث عند إيقاف النفق.
 - **TCP على منفذ 53**: خارج النطاق؛ يُعدّ ولا يُخدم (الردّ الصحيح برمجيًا هو `TC=1` لكن النفق
   لا يخدم TCP).
-- **الحظر الصارم للعناوين (Strict Resolver IPs)**: معطّل افتراضيًا
-  (`StrictResolverIps.STRICT_RESOLVER_IPS_ENABLED = false`) وقائمته فارغة حتى قرار الترخيص.
-  عند تفعيله تُوجَّه عناوين محدّدة إلى النفق ويُسقط عليها كل منفذ إلا 53 (أي 853 و 443)، وهذا
-  **يزيد استهلاك البطارية** لأن النفق يقرأ حزمًا أكثر ويجيب عن استعلامات أكثر. لذلك يبقى معطّلًا
-  افتراضيًا ولا يُفعَّل إلا عند وجود حلّال مشفّر يُستخدم فعلاً.
+- **الحظر الصارم للعناوين (Strict Resolver IPs)**: **مفعّل**
+  (`StrictResolverIps.STRICT_RESOLVER_IPS_ENABLED = true`) بـ 12 عنوان حلّال عام. تُوجَّه هذه
+  العناوين إلى النفق ويُسقط عليها كل منفذ إلا 53 (أي 853 و 443)، **قبل** فحص منفذ DNS حتى لا يكون
+  الحكم كودًا ميتًا. هذا **يزيد استهلاك البطارية** لأن النفق يقرأ حزمًا أكثر؛ مقبول مقابل منع
+  تجاوز الحجب عبر الحلّالات المشفّرة المعروفة. Private DNS إلى مضيف مخصّص يبقى خارج النطاق ويُحذَّر
+  منه في الواجهة.
 - **ترتيب السياسة**: يمر القرار بثمانية مسارات مرتبة (قفل المستخدم، canary، SafeSearch، القائمة
   البيضاء، قائمة الإباحية، قائمة الالتفاف، قائمة المحركات غير المدعومة، السماح) — موثّق في
   `docs/ARCHITECTURE.md`.
+- **ممارسات البطارية/الأداء المطبّقة**:
+  - مقبس UDP واحد مُعاد استخدامه لكل استعلامات الـ upstream (`ReusableDnsSocket`) بدل مقبس لكل طلب.
+  - `setUnderlyingNetworks` مُثبَّت ومُحدَّث مع الشبكة الفيزيائية حتى لا تبقى شبكتان مرفوعتين.
+  - تخزين سلبي 60 ثانية لـ NXDOMAIN/NODATA لتقليل رحلات الشبكة.
+  - فحص سلسلة CNAME (`cloaksBlockedDomain`) لسدّ تجاوز الحجب عبر CNAME cloaking.
+  - `setBlocking(true)` + خيط قراءة واحد + latch (لا polling) + لا wake locks (R3/R4).
 
 ## الفحوص التي تعمل في CI
 

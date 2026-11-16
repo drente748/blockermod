@@ -1,6 +1,5 @@
 package com.blockermod.platform.vpn
 
-import com.blockermod.core.dns.DnsRecord
 import com.blockermod.core.dns.DnsTypes
 import com.blockermod.core.net.Ipv4UdpCodec
 import com.blockermod.core.matcher.InMemoryDomainMatcher
@@ -97,10 +96,12 @@ class VpnTunnelTest {
             safeSearchTable = InMemorySafeSearchTable(emptyMap()),
         ),
         upstream = EmptyUpstream,
+        cache = DnsCache(),
     )
 
     private object EmptyUpstream : DnsUpstream {
-        override fun lookup(host: String, type: Int) = emptyList<DnsRecord>()
+        override fun lookup(host: String, type: Int) =
+            DnsWire.Answer(DnsWire.RCODE_NOERROR, emptyList())
     }
 
     private fun readU16(packet: ByteArray, offset: Int): Int =

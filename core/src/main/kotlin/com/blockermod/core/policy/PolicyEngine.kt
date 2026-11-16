@@ -91,6 +91,9 @@ class PolicyEngine(
         return BlockingResult.Allowed
     }
 
+    /** The bypass-attempt matcher, exposed for SNI-based DoH detection in the platform layer. */
+    fun bypassMatcher(): DomainMatcher = bypassBlocklist
+
     private fun probe(source: DomainMatcher) {
         source.matches(PROBE_DOMAIN)
     }

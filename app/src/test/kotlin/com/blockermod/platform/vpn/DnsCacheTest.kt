@@ -4,6 +4,7 @@ import com.blockermod.core.dns.DnsRecord
 import com.blockermod.core.dns.DnsTypes
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -70,5 +71,25 @@ class DnsCacheTest {
         cache.put("a.example/1", emptyList(), 60)
 
         assertEquals(0, cache.size())
+    }
+
+    @Test
+    fun `negative answers are remembered then expire`() {
+        val cache = DnsCache()
+        cache.rememberNegative("missing.example/1", 60, nowMillis = 0)
+
+        assertTrue(cache.isNegative("missing.example/1", nowMillis = 59_000))
+        assertFalse(cache.isNegative("missing.example/1", nowMillis = 61_000))
+    }
+
+    @Test
+    fun `clearing drops negative answers too`() {
+        val cache = DnsCache()
+        cache.rememberNegative("missing.example/1", 60)
+        assertTrue(cache.isNegative("missing.example/1"))
+
+        cache.clear()
+
+        assertFalse(cache.isNegative("missing.example/1"))
     }
 }

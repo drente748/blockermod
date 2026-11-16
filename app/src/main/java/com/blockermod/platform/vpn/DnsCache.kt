@@ -23,9 +23,41 @@ internal class DnsCache(
             size > maxEntries
     }
 
+    /** Short-lived negative answers (NXDOMAIN/NODATA), keyed the same way as positive entries. */
+    private val negative = object : LinkedHashMap<String, Long>(INITIAL_CAPACITY, LOAD_FACTOR, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Long>?): Boolean =
+            size > maxEntries
+    }
+
+    /**
+     * Remembers that a name had no answer, so repeated lookups avoid another upstream round trip.
+     */
+    @Synchronized
+    fun rememberNegative(
+        key: String,
+        ttlSeconds: Long,
+        nowMillis: Long = System.currentTimeMillis(),
+    ) {
+        negative[key] = nowMillis + effectiveTtlSeconds(ttlSeconds) * 1000L
+    }
+
+    /**
+     * True when [key] is known to have no answer and the short TTL has not expired.
+     */
+    @Synchronized
+    fun isNegative(key: String, nowMillis: Long = System.currentTimeMillis()): Boolean {
+        val until = negative[key] ?: return false
+        if (until <= nowMillis) {
+            negative.remove(key)
+            return false
+        }
+        return true
+    }
+
     /**
      * Returns the cached records for the key, or null when the entry is missing or expired.
      */
+    @Synchronized
     fun get(key: String, nowMillis: Long = System.currentTimeMillis()): List<DnsRecord>? {
         val entry = entries[key] ?: return null
         if (entry.expiresAtMillis <= nowMillis) {
@@ -36,8 +68,32 @@ internal class DnsCache(
     }
 
     /**
+     * Like [get], but returns the records with their remaining TTL so cached answers do not keep
+     * advertising a TTL that has already elapsed at the client.
+     */
+    @Synchronized
+    fun getFresh(key: String, nowMillis: Long = System.currentTimeMillis()): List<DnsRecord>? {
+        val entry = entries[key] ?: return null
+        if (entry.expiresAtMillis <= nowMillis) {
+            entries.remove(key)
+            return null
+        }
+        val remaining = maxOf(1L, (entry.expiresAtMillis - nowMillis) / 1000L)
+        return entry.records.map { record ->
+            DnsRecord(
+                record.name,
+                record.type,
+                record.klass,
+                minOf(record.ttlSeconds, remaining),
+                record.data,
+            )
+        }
+    }
+
+    /**
      * Stores the records under the key with a time to live clamped to the configured range.
      */
+    @Synchronized
     fun put(
         key: String,
         records: List<DnsRecord>,
@@ -52,13 +108,16 @@ internal class DnsCache(
     /**
      * Number of entries currently held.
      */
+    @Synchronized
     fun size(): Int = entries.size
 
     /**
      * Drops every entry.
      */
+    @Synchronized
     fun clear() {
         entries.clear()
+        negative.clear()
     }
 
     /**

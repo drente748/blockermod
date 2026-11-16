@@ -1,5 +1,7 @@
 package com.blockermod.platform.vpn
 
+import com.blockermod.core.DomainMatcher
+import com.blockermod.core.net.Ipv4TcpCodec
 import com.blockermod.core.net.Ipv4UdpCodec
 import java.io.IOException
 import java.io.InputStream
@@ -35,6 +37,9 @@ internal class VpnTunnel(
     private val responder: DnsResponder,
     private val workerCount: Int = WORKER_COUNT,
     private val pendingLimit: Int = PENDING_LIMIT,
+    private val fullTunnel: Boolean = false,
+    private val tcpRelay: TcpRelay? = null,
+    private val udpRelay: UdpRelay? = null,
 ) {
 
     /** Current lifecycle state of the tunnel. */
@@ -90,7 +95,8 @@ internal class VpnTunnel(
     fun awaitStopped(timeoutMillis: Long): Boolean {
         val signalled = shutdownLatch.await(timeoutMillis, TimeUnit.MILLISECONDS)
         readerThread.join(timeoutMillis)
-        return signalled && !readerThread.isAlive
+        waiterThread.join(timeoutMillis)
+        return signalled && !readerThread.isAlive && !waiterThread.isAlive
     }
 
     /**
@@ -111,6 +117,8 @@ internal class VpnTunnel(
     private fun awaitShutdown() {
         shutdownLatch.await()
         closeQuietly(input)
+        tcpRelay?.closeAll()
+        udpRelay?.closeAll()
         executor.shutdownNow()
         executor.awaitTermination(SHUTDOWN_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)
         state = TunnelState.Idle
@@ -125,7 +133,8 @@ internal class VpnTunnel(
             } catch (exception: IOException) {
                 break
             }
-            if (size <= 0) continue
+            if (size < 0) break // end of stream: the descriptor was closed
+            if (size == 0) continue
 
             val packet = buffer.copyOf(size)
             try {
@@ -137,15 +146,24 @@ internal class VpnTunnel(
     }
 
     private fun handle(packet: ByteArray) {
+        if (fullTunnel) {
+            handleFullTunnel(packet)
+            return
+        }
         val parsed = Ipv4UdpCodec.parseIpv4Udp(packet)
         if (parsed == null) {
             if (isTcpToDnsPort(packet)) tcpPackets.incrementAndGet()
             return
         }
-        if (parsed.destinationPort != DNS_PORT) return
-        if (StrictResolverIps.isStrictResolver(parsed.destinationAddress) && StrictResolverIps.isDroppedPort(parsed.destinationPort)) {
+        // Encrypted DNS to a known resolver is dropped before the plain-DNS port check; otherwise a
+        // query to port 853/443 would be rejected by the port check below and the strict rule would
+        // never run. TCP to those ports is dropped by parseIpv4Udp returning null.
+        if (StrictResolverIps.isStrictResolver(parsed.destinationAddress) &&
+            StrictResolverIps.isDroppedPort(parsed.destinationPort)
+        ) {
             return
         }
+        if (parsed.destinationPort != DNS_PORT) return
 
         val response = responder.respond(parsed.payload) ?: return
         val answer = Ipv4UdpCodec.buildIpv4UdpResponse(parsed, response)
@@ -153,6 +171,54 @@ internal class VpnTunnel(
         synchronized(outputLock) {
             try {
                 output.write(answer)
+                output.flush()
+            } catch (exception: IOException) {
+                return
+            }
+        }
+        answeredPackets.incrementAndGet()
+    }
+
+    /**
+     * Full-tunnel dispatch: DNS is still answered locally by the policy engine, while other UDP and
+     * all TCP flows are relayed through protected sockets. Encrypted DNS to known resolvers is
+     * dropped by the relay; DoH to arbitrary hosts is stopped through TLS SNI inspection.
+     */
+    private fun handleFullTunnel(packet: ByteArray) {
+        val udp = Ipv4UdpCodec.parseIpv4Udp(packet)
+        if (udp != null) {
+            if (StrictResolverIps.isStrictResolver(udp.destinationAddress) &&
+                StrictResolverIps.isDroppedPort(udp.destinationPort)
+            ) {
+                return
+            }
+            if (udp.destinationPort == 53) {
+                val response = responder.respond(udp.payload) ?: return
+                writeAnswer(packet, Ipv4UdpCodec.buildIpv4UdpResponse(udp, response))
+                return
+            }
+            udpRelay?.handle(udp)
+            return
+        }
+
+        val tcp = Ipv4TcpCodec.parse(packet) ?: return
+        if (StrictResolverIps.isStrictResolver(tcp.destinationAddress) &&
+            StrictResolverIps.isDroppedPort(tcp.destinationPort)
+        ) {
+            writePacketAsync(Ipv4TcpCodec.reset(tcp))
+            return
+        }
+        tcpRelay?.handle(tcp)
+    }
+
+    private fun writeAnswer(original: ByteArray, answer: ByteArray) {
+        writePacketAsync(answer)
+    }
+
+    private fun writePacketAsync(packet: ByteArray) {
+        synchronized(outputLock) {
+            try {
+                output.write(packet)
                 output.flush()
             } catch (exception: IOException) {
                 return
