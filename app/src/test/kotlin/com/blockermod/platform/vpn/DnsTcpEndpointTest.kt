@@ -69,6 +69,25 @@ class DnsTcpEndpointTest {
     }
 
     @Test
+    fun `the third ack may carry the first query`() {
+        endpoint.closeAll()
+        responses.reset()
+        endpoint.handle(seg(clientIsn, flags = Ipv4TcpCodec.Flags.SYN))
+        val synAck = Ipv4TcpCodec.parse(responses.toByteArray())!!
+        serverIsn = synAck.sequenceNumber
+        responses.reset()
+
+        // TCP permits data on the handshake-completing ACK; resetting it would lose the query (B4).
+        val framed = frameDnsTcp(DnsWire.buildQuery(0x51, "early.example", 1))
+        endpoint.handle(seg(clientIsn + 1, ack = (serverIsn + 1) and SEQ,
+            flags = Ipv4TcpCodec.Flags.ACK or Ipv4TcpCodec.Flags.PSH, payload = framed))
+
+        assertEquals(1, framedMessages().size, "the query on the third ACK must be answered")
+        assertTrue(parseAll().none { it.flags and Ipv4TcpCodec.Flags.RST != 0 })
+        assertEquals(1, endpoint.connectionCount())
+    }
+
+    @Test
     fun `data before completing handshake is reset`() {
         endpoint.closeAll()
         responses.reset()
@@ -266,12 +285,20 @@ class DnsTcpEndpointTest {
             "no FIN while answer bytes are unacknowledged")
         assertEquals(1, endpoint.connectionCount())
 
-        // Acknowledge the full answer; now FIN is sent and the connection closes.
+        // Acknowledge the full answer; now FIN is sent and the flow enters LAST-ACK.
         val lastSeq = data.maxOf { it.sequenceNumber }
         val finalAck = (lastSeq + data.first { it.sequenceNumber == lastSeq }.payload.size.toLong()) and SEQ
         responses.reset()
         endpoint.handle(seg(clientIsn + 1 + query.size, ack = finalAck, flags = Ipv4TcpCodec.Flags.ACK))
         assertEquals(1, parseAll().count { it.flags and Ipv4TcpCodec.Flags.FIN != 0 })
+        assertEquals(1, endpoint.connectionCount(), "LAST-ACK: stay until the client ACKs our FIN")
+
+        // Extended regression (B4): the client's final ACK closes the flow without an RST.
+        responses.reset()
+        endpoint.handle(seg(clientIsn + 1 + query.size, ack = (finalAck + 1L) and SEQ,
+            flags = Ipv4TcpCodec.Flags.ACK))
+        assertEquals(0, parseAll().count { it.flags and Ipv4TcpCodec.Flags.RST != 0 },
+            "the final ACK must be accepted, not reset")
         assertEquals(0, endpoint.connectionCount())
     }
 

@@ -51,6 +51,9 @@ internal class DnsTcpEndpoint(
         var clientFin: Boolean = false,
         var ourFinSent: Boolean = false,
         var closed: Boolean = false,
+        // LAST-ACK: after our FIN the flow stays in the table until the client acknowledges it.
+        var closing: Boolean = false,
+        var finSequence: Long = 0L,
         // Tracks the peer's ACK number in OUR sequence space (starts at SND.UNA = our ISN+1),
         // used only to detect duplicate ACKs for fast retransmit.
         var lastAck: Long = send.sndUna,
@@ -74,7 +77,7 @@ internal class DnsTcpEndpoint(
         reapIdle(key)
 
         if (rst) {
-            connections.remove(key)?.let { close(it) }
+            connections[key]?.let { close(it) }
             return
         }
 
@@ -111,15 +114,23 @@ internal class DnsTcpEndpoint(
         }
         synchronized(connection) {
             if (connection.closed) return@synchronized
-            connection.request = packet
             connection.lastActivityMillis = nowMillis()
 
-            // The third handshake packet must be a pure ACK of our ISN+1. Merely carrying ACK is not
-            // enough: a stray ACK must not open the connection.
+            // LAST-ACK: our FIN was sent; only the client's ACK of (FIN sequence + 1) completes the
+            // close. Until then the flow must stay in the table, otherwise the final ACK gets an RST.
+            if (connection.closing) {
+                if (ack && serialEqual(packet.acknowledgmentNumber, (connection.finSequence + 1L) and SEQ_MASK)) {
+                    close(connection)
+                }
+                return@synchronized
+            }
+            connection.request = packet
+
+            // The third handshake packet must be an ACK of our ISN+1 carrying the client's next
+            // sequence number. TCP permits payload on that ACK (a client may send its query right
+            // away); rejecting it would reset a legal connection (B4).
             if (!connection.established) {
-                // Strict three-way handshake: the third packet must acknowledge our ISN+1 and carry
-                // the client's next sequence number (client ISN+1). Anything else is reset.
-                if (!ack || fin || packet.payload.isNotEmpty() ||
+                if (!ack || fin ||
                     !serialEqual(packet.acknowledgmentNumber, (connection.isn + 1L) and SEQ_MASK) ||
                     !serialEqual(packet.sequenceNumber, (connection.clientIsn + 1L) and SEQ_MASK)
                 ) {
@@ -204,16 +215,18 @@ internal class DnsTcpEndpoint(
             // Do NOT send FIN until every queued answer segment has been acknowledged.
             if (connection.clientFin && connection.send.allAcked() && !connection.ourFinSent) {
                 connection.ourFinSent = true
+                connection.finSequence = connection.send.sndNxt
+                connection.closing = true
                 writePacket(
                     Ipv4TcpCodec.build(
                         request = packet,
                         payload = EMPTY,
-                        sequenceNumber = connection.send.sndNxt,
+                        sequenceNumber = connection.finSequence,
                         acknowledgmentNumber = connection.stream.expectedSequence,
                         flags = Ipv4TcpCodec.Flags.FIN or Ipv4TcpCodec.Flags.ACK,
                     ),
                 )
-                close(connection)
+                // The LAST-ACK state is reaped on idle if the client never sends its final ACK.
             }
         }
     }
@@ -247,7 +260,6 @@ internal class DnsTcpEndpoint(
         connections.values.forEach { flow ->
             if (flow.key != activeKey && now - flow.lastActivityMillis > idleTimeoutMillis) {
                 close(flow)
-                connections.remove(flow.key, flow)
             }
         }
     }
@@ -301,12 +313,15 @@ internal class DnsTcpEndpoint(
     }
 
     private fun close(connection: Connection) {
-        if (connection.closed) return
-        connection.closed = true
-        connection.send.clear()
-        // Centralized table cleanup: every close path (RST, FIN, malformed frame, bound exceeded,
-        // idle reap) must remove the entry so it cannot leak or block new connections.
-        connections.remove(connection.key, connection)
+        synchronized(connection) {
+            if (connection.closed) return
+            connection.closed = true
+            connection.send.clear()
+            // Centralized table cleanup: every close path (RST, FIN, malformed frame, bound exceeded,
+            // idle reap) must remove the entry so it cannot leak or block new connections. The
+            // monitor makes the closed flag and the table removal one atomic action (B4).
+            connections.remove(connection.key, connection)
+        }
     }
 
     private fun effectiveMss(advertised: Int): Int =
