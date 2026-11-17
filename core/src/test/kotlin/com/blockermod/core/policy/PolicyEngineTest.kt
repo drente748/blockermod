@@ -177,6 +177,26 @@ class PolicyEngineTest {
     }
 
     @Test
+    fun `local use names are allowed even when a list carries them`() {
+        // Hosts sources historically contain "127.0.0.1 localhost" (B1); blocking it would break
+        // every application that resolves localhost.
+        val engine = engine(adultBlocklist = setOf("localhost", "sub.localhost"))
+
+        assertEquals(BlockingResult.Allowed, engine.evaluate("localhost"))
+        assertEquals(BlockingResult.Allowed, engine.evaluate("foo.localhost"))
+        assertEquals(BlockingResult.Allowed, engine.evaluate("localhost.localdomain"))
+        assertEquals(BlockingResult.Allowed, engine.evaluate("router.lan"))
+        assertEquals(BlockingResult.Allowed, engine.evaluate("printer"))
+    }
+
+    @Test
+    fun `a normal domain sharing a local word is still blocked`() {
+        val engine = engine(adultBlocklist = setOf("evil-localhost-keeper.com"))
+
+        assertEquals(BlockingResult.Blocked(BlockReason.BLOCKLIST_ADULT), engine.evaluate("evil-localhost-keeper.com"))
+    }
+
+    @Test
     fun `default lockout policy does not change the result`() {
         val withDefault = engine()
         val withNoOp = engine(lockoutPolicy = NoOpLockout)

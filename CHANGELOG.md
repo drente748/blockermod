@@ -2,6 +2,33 @@
 
 سجل زمني للتغييرات. كل جولة عمل تُسجَّل هنا.
 
+## Unreleased - جولة الإصلاح الجذري المختبر (قيد التنفيذ)
+
+إصلاحات هندسية عميقة لمحرك الحجب، كل إصلاح معه اختبار انحدار كان سيفشل قبل الإصلاح.
+
+### Fixed
+
+- **A1 — خريطة أصول خاطئة**: كان `AssetRules` يقرأ كل قائمة معبّأة من إزاحة 0 بينما يولّد البناء
+  ترويسة 6 بايت قبل الجدول؛ البحث الثنائي كان يبدأ وسط تسميات فعلية. الآن `openPacked(fd, start,
+  length)` يطابق نطاق الأصل الحقيقي لكل قائمة، ونمط `BlocklistHandle` واحد يخدم القوائم الثلاث.
+  اختبار انحدار JVM (`AssetRulesRegionTest`) + اختبار أجهزة (يعمل على محاكي/CI فقط).
+- **A2 — أب يقفز إلى أب**: بناء القوائم كان يسقط أي نطاق هو نفسه أب (يسقط `pornhub.com` ويبقي
+  `www.pornhub.com`). الآن `pack()` يبقي الآباء ويُسقط الأبناء المشمولين فقط؛ القائمة أعيد بناؤها
+  (154,897 → **154,844** نطاقًا بعد إصلاح B1) واختبار القائمة المعبأة يتحقق من `pornhub.com`.
+- **A3 — DoT في Full Tunnel**: TCP/853 كان يمرّ عبر الـ relay بدون قرار سياسة (يُجاب SYN-ACK ثم
+  يُعاد الاتصال)؛ الآن `VpnTunnel` يوجّهه إلى `TransportPolicy` ⇒ RST، والـ relay يطبق نفس البوابة
+  دفاعيًا. اختبار TCP-853 ⇒ RST وTCP-443 ⇒ SYN-ACK.
+- **B1 — أسماء local-use**: أسماء `localhost`/`*.local`/`home.arpa`/`*.lan`... وحيدة التسمية لا تُحظر
+  أبدًا من السياسة (كان مصادر hosts تحمل `127.0.0.1 localhost` وتدخل القوائم)، وتُستثنى من
+  حماية rebinding عبر قائمة واحدة مشتركة `core/.../policy/LocalUseNames` تحكم السياسة والحلّال
+  المحلي معًا، و`normalize()` في `tools/pack.py` يرفضها من كل القوائم المعبأة.
+  اختبارا انحدار في `PolicyEngineTest` (مسموحة رغم وجودها في قائمة + نطاق عادي يحمل كلمة localhost يُحظر).
+
+### Verified (حتى B1)
+
+- `:core:test :app:testDebugUnitTest` — **244 اختبارًا** (158 core + 86 app)، 0 فشل.
+- `:app:lintDebug` — 0 مشاكل. `:app:assembleDebug`/`assembleRelease` — SUCCESS.
+
 ## Unreleased - جولة القرارات النهائية وإغلاق كل القرارات المفتوحة
 
 ### Changed (قرارات نهائية)
@@ -153,7 +180,7 @@
   hagezi NSFW + DoH/VPN/Proxy Bypass + NoSafeSearch (GPL-3.0 للبيانات — بقرار من المستخدم وتحديث
   `docs/LICENSE_DECISIONS.md`).
 - **`tools/build-blocklist.sh`** صار يدعم صيغة Adblock Plus وينتج ثلاث قوائم: `blocklist.bin`
-  (154,897 نطاق إباحي)، `bypass.bin` (16,458 نطاق DNS مشفّر/التفاف)، `unsupported.bin` (202 محرك
+  (154,844 نطاق إباحي)، `bypass.bin` (16,458 نطاق DNS مشفّر/التفاف)، `unsupported.bin` (202 محرك
   بلا SafeSearch)، مع `.meta` لكل قائمة.
 - **`AssetRules.openMatcher`** محمّل عام لأي قائمة معبّأة؛ `createPolicyEngine` يربط قوائم الالتفاف
   والمحركات غير المدعومة ويقع في الفشل المغلق عند غيابها.

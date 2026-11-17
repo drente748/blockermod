@@ -204,7 +204,6 @@ fi
 mkdir -p "${OUTPUT_DIR}"
 
 PACK_RESULT="$(python3 - "${SCRIPT_DIR}" "${OUTPUT_DIR}" "${ALLOWLIST}" "${SAFESEARCH_HOSTS}" "${#CACHED_FILES[@]}" "${CATEGORIES[@]}" "${CACHED_FILES[@]}" <<'PY'
-import ipaddress
 import json
 import os
 import sys
@@ -218,9 +217,7 @@ categories = sys.argv[6:6 + source_count]
 source_paths = sys.argv[6 + source_count:]
 
 sys.path.insert(0, script_dir)
-from pack import pack
-
-
+from pack import extract_domains, pack
 
 def read_list(path):
     values = set()
@@ -235,65 +232,8 @@ def read_list(path):
     return values
 
 
-def is_address(value):
-    try:
-        ipaddress.ip_address(value)
-        return True
-    except ValueError:
-        return False
-
-
-def normalize(value):
-    value = value.strip().lower().rstrip(".")
-    if not value or is_address(value):
-        return None
-    if " " in value or "/" in value:
-        return None
-    try:
-        value = value.encode("idna").decode("ascii")
-    except (UnicodeError, UnicodeDecodeError):
-        return None
-    labels = value.split(".")
-    if not labels or any(not label for label in labels):
-        return None
-    for label in labels:
-        if len(label) > 63:
-            return None
-        if not all(character.isalnum() or character in "-_" for character in label):
-            return None
-    if len(value) > 253:
-        return None
-    return value
-
-
-def extract_domains(path):
-    """Parses hosts-format lines (0.0.0.0 domain) and Adblock Plus rules (||domain^)."""
-    domains = set()
-    with open(path, "r", encoding="utf-8", errors="replace") as handle:
-        for raw in handle:
-            line = raw.strip()
-            if not line or line.startswith("#") or line.startswith("!") or line.startswith("["):
-                continue
-            candidate = None
-            if line.startswith("||"):
-                # Adblock Plus: ||domain^  (optionally ||domain^$options)
-                rule = line[2:].split("$", 1)[0]
-                candidate = rule.split("^", 1)[0]
-            else:
-                fields = line.split()
-                if len(fields) >= 2 and is_address(fields[0]):
-                    candidate = fields[1]
-                elif len(fields) == 1:
-                    candidate = fields[0]
-            if candidate:
-                domain = normalize(candidate)
-                if domain:
-                    domains.add(domain)
-    return domains
-
-
-# pack() lives in tools/pack.py and is imported above, so the build script and the standalone
-# regression test share one implementation.
+# normalize(), extract_domains(), is_address() and pack() live in tools/pack.py and are imported
+# above, so the build script and the standalone regression test share one implementation.
 
 protected = read_list(allowlist_path) | read_list(safesearch_path)
 

@@ -13,7 +13,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from pack import pack, proper_parents
+from pack import pack, proper_parents, normalize, extract_domains, LOCAL_USE_SUFFIXES
 
 failures = []
 
@@ -64,6 +64,36 @@ check("proper_parents of a deep domain",
 result = pack({"ads.example.com", "tracker.example.net"})
 domains = unpack(*result)
 check("uncovered children stay", domains == {"ads.example.com", "tracker.example.net"}, str(domains))
+
+# Local-use names must never enter a packed list (B1).
+check("single label rejected", normalize("localhost") is None)
+check("single label broadcasthost rejected", normalize("broadcasthost") is None)
+check("localhost.localdomain rejected", normalize("localhost.localdomain") is None)
+check("ip6-localhost rejected", normalize("ip6-localhost") is None)
+check("foo.localhost rejected", normalize("foo.localhost") is None)
+check("foo.local rejected", normalize("foo.local") is None)
+check("lan suffix rejected", normalize("nas.lan") is None)
+check("home.arpa suffix rejected", normalize("router.home.arpa") is None)
+for suffix in LOCAL_USE_SUFFIXES:
+    check("suffix %s itself rejected" % suffix, normalize(suffix) is None)
+check("ordinary domain survives", normalize("Example.COM.") == "example.com")
+check("address rejected", normalize("127.0.0.1") is None)
+
+# A standard hosts header must produce no entries (B1).
+hosts_lines = "\n".join([
+    "127.0.0.1 localhost",
+    "127.0.0.1 localhost.localdomain",
+    "255.255.255.255 broadcasthost",
+    "::1 ip6-localhost ip6-loopback",
+    "fe00::0 ip6-localnet",
+    "0.0.0.0 ads.example.com",
+])
+hosts_path = os.path.join(os.environ.get("TEMP", "/tmp"), "test-pack-hosts")
+with open(hosts_path, "w", encoding="utf-8") as handle:
+    handle.write(hosts_lines)
+domains = extract_domains(hosts_path)
+os.remove(hosts_path)
+check("standard hosts lines yield only real domains", domains == {"ads.example.com"}, str(domains))
 
 print()
 if failures:

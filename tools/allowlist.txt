@@ -3,3 +3,13 @@
 
 example.org
 example.net
+# Names reserved for local use (RFC 6761/6762/8375 and common LAN suffixes). Resolving them must
+# never be filtered, and the build script rejects them from every packed list as well (B1).
+localhost
+localhost.localdomain
+localdomain
+local
+home.arpa
+lan
+home
+internal

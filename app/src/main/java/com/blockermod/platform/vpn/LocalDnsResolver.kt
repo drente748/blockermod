@@ -7,6 +7,7 @@ import com.blockermod.core.dns.DnsCodec
 import com.blockermod.core.dns.DnsQuery
 import com.blockermod.core.dns.DnsRecord
 import com.blockermod.core.dns.DnsTypes
+import com.blockermod.core.policy.LocalUseNames
 import com.blockermod.core.policy.PolicyEngine
 
 /**
@@ -167,32 +168,14 @@ internal class LocalDnsResolver(
     private fun cacheKey(host: String, type: Int): String = "$host/$type"
 
     /**
-     * True for names reserved for local use, which are expected to resolve to private addresses:
-     * `.local` (mDNS, RFC 6762), `.home.arpa` (RFC 8375), the special-use names from RFC 6761,
-     * and single-label hostnames. Rebinding protection must not reject these.
+     * True for names reserved for local use, which are expected to resolve to private addresses.
+     * Delegates to the shared [com.blockermod.core.policy.LocalUseNames] list (B1).
      */
-    private fun isLocalUseName(name: String): Boolean {
-        val host = name.trim().trimEnd('.').lowercase()
-        if (host.isEmpty()) return false
-        if (!host.contains('.')) return true // single-label hostname
-        return LOCAL_USE_SUFFIXES.any { host == it || host.endsWith(".$it") }
-    }
+    private fun isLocalUseName(name: String): Boolean = LocalUseNames.isLocalUseName(name)
 
     private companion object {
         const val TYPE_SVCB: Int = 64
         const val CLASS_IN: Int = 1
         const val MAX_CNAME_HOPS: Int = 5
-
-        val LOCAL_USE_SUFFIXES = listOf(
-            "localhost", // RFC 6761
-            "local",     // RFC 6762 (mDNS)
-            "home.arpa", // RFC 8375
-            "lan",       // common local-network suffix
-            "home",      // common local-network suffix
-            "internal",  // common local-network suffix
-            "test",      // RFC 6761
-            "example",   // RFC 6761
-            "invalid",   // RFC 6761
-        )
     }
 }

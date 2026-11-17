@@ -67,6 +67,12 @@ class PolicyEngine(
             return BlockingResult.Blocked(BlockReason.CANARY)
         }
 
+        // Local-use names (localhost, *.local, ...) must resolve even if a list ever contained
+        // them: hosts sources historically carry "127.0.0.1 localhost" (B1).
+        if (LocalUseNames.isLocalUseName(normalized)) {
+            return BlockingResult.Allowed
+        }
+
         val safeSearchTarget = safeSearchTable.lookup(normalized)
         if (safeSearchTarget != null) {
             return BlockingResult.Rewrite(safeSearchTarget, normalized)

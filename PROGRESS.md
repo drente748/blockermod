@@ -6,15 +6,29 @@
 
 | البند | القيمة |
 |---|---|
-| المرحلة | 1 — مراجعة هندسية عميقة لمحرك الحجب (الجولة الحالية) |
+| المرحلة | 2 — إصلاح جذري مختبر للمحرك (A1–A3 مكتملة، B/C قيد التنفيذ) |
 | الوحدات | `:core` (Kotlin/JVM خالص) و`:app` (أندرويد)، `:app → :core` فقط |
-| الاختبارات | **235 اختبار** (155 في `:core` + 80 في `:app`) — انظر قسم التحقق |
+| الاختبارات | **244 اختبارًا** (158 في `:core` + 86 في `:app`) — انظر قسم التحقق |
 | Lint | يُتحقَّق منه في قسم التحقق أدناه |
-| القوائم | 154,897 نطاق إباحي + 16,458 نطاق التفاف/DNS مشفّر + 202 محرك بلا SafeSearch، من 6 مصادر مثبّتة |
+| القوائم | 154,844 نطاق إباحي + 16,458 نطاق التفاف/DNS مشفّر + 202 محرك بلا SafeSearch، من 6 مصادر مثبّتة |
 | وضع التشغيل | DNS-only (افتراضي، معتمد) + Full Tunnel (تجريبي، اختياري) |
 | IPv6 | فشل مغلق في Full Tunnel؛ لا دعم IPv6 كامل — قيد موثّق |
 | بناء APK | release **موقّع بمفتاح إنتاج** (v2) — انظر قسم التحقق |
 | التوقيع | `blockermod-release.jks` (RSA 2048، SHA384withRSA، صالح حتى 2054)، خارج المستودع؛ الإعدادات في `keystore.properties` (مُستبعد من git) |
+
+## الجولة الجارية — الإصلاح الجذري المختبر (A1→C10، قيد التنفيذ)
+
+لكل إصلاح: اختبار انحدار كان سيفشل قبل الإصلاح، وcommit تقليدي منفصل، والقاعدة «:app → :core»
+ونحوها. العدد الحالي للأساس قبل الجولة: 235 اختبارًا؛ الحالي: **244** (لا اختبار حُذف أو أُضعف).
+
+| البند | ما أُصلح | اختبار الانحدار | الحالة |
+|---|---|---|---|
+| A1 | قراءة القوائم المعبأة من إزاحتها الحقيقية (`openPacked(fd, start, length)`) | `AssetRulesRegionTest` (JVM) | ✅ |
+| A2 | إبقاء الآباء وإسقاط الأبناء المشمولين فقط في البناء | `BlocklistTest` (نطاقات حقيقية) + `tools/test-pack.py` | ✅ |
+| A3 | حظر DoT على TCP/853 في Full Tunnel عبر `TransportPolicy` | اختبارات TCP-853/443 التكاملية | ✅ |
+| B1 | أسماء local-use لا تُحظر ولا تُعبّأ ولا تُرفض في rebinding | `PolicyEngineTest` (اختباران) + `tools/test-pack.py` | ✅ |
+
+البقية (B2→B10، C1→C10) تعمل بعد إتمام B1.
 
 ## هذه الجولة — إكمال DNS-over-TCP (طلب مخصّص)
 
@@ -142,11 +156,11 @@
 
 | # | الأمر | النتيجة |
 |---|---|---|
-| 1 | `./gradlew :core:test` | **PASS** — 155 اختبارًا، 0 فشل |
-| 2 | `./gradlew :app:testDebugUnitTest` | **PASS** — 80 اختبارًا، 0 فشل |
-| 3 | `./gradlew :app:lintDebug` | **PASS** — `No issues found.` |
-| 4 | `./gradlew :app:assembleDebug` | **PASS** — `app-debug.apk` (6.7 MB) |
-| 5 | `./gradlew :app:assembleRelease` | **PASS** — `app-release.apk` موقّع v2 (5.8 MB) |
+| 1 | `./gradlew :core:test` | **PASS** — 158 اختبارًا، 0 فشل |
+| 2 | `./gradlew :app:testDebugUnitTest` | **PASS** — 86 اختبارًا، 0 فشل |
+| 3 | `./gradlew :app:lintDebug` | **PASS** — لا مشاكل (0 بعد نقل اعتماديات androidTest للـ catalog) |
+| 4 | `./gradlew :app:assembleDebug` | **PASS** — `app-debug.apk` |
+| 5 | `./gradlew :app:assembleRelease` | **PASS** — `app-release.apk` موقّع v2 |
 | 6 | فحوص CI الجديدة (IPv6 fail-closed، `UDP_DOQ_853`، لا `::/0`، لا `sleep`) | **PASS** محليًا |
 | 7 | اختبارات الأجهزة الحقيقية (`docs/MANUAL_TESTS.md`) | **NOT RUN** — لا جهاز/ADB متاح |
 

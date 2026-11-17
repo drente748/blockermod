@@ -231,7 +231,7 @@ app/src/main/assets/blocklist.bin  (+ blocklist.meta)
 - بوابة الترخيص تُسجَّل في `docs/LICENSE_DECISIONS.md`، وإشعارات الأطراف الثالثة في
   `docs/THIRD_PARTY_NOTICES.md`.
 - `:core` لا يقرأ الشبكة إطلاقًا، والاختبارات تقرأ الملف المجمَّع من القرص مباشرة.
-- الأصول تحتوي قوائم حظر حقيقية مبنية وقت البناء: `blocklist.bin` (154,897 نطاقًا إباحيًا)،
+- الأصول تحتوي قوائم حظر حقيقية مبنية وقت البناء: `blocklist.bin` (154,844 نطاقًا إباحيًا)،
   `bypass.bin` (16,458 نطاق DNS مشفّر/التفاف)، `unsupported.bin` (202 محرك بلا SafeSearch)،
   مع ملفات `.meta` تحمل العدد والبصمة؛ انظر `docs/THIRD_PARTY_NOTICES.md`.
 
