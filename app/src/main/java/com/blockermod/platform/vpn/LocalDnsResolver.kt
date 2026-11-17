@@ -91,12 +91,21 @@ internal class LocalDnsResolver(
         cache.getFresh(key)?.let { return DnsWire.Answer(DnsWire.RCODE_NOERROR, it) }
         if (cache.isNegative(key)) return DnsWire.Answer(DnsWire.RCODE_NXDOMAIN, emptyList())
 
-        val answer = upstream.lookup(name, type)
-        if (answer.rcode == DnsWire.RCODE_NXDOMAIN) {
+        val upstreamAnswer = upstream.lookup(name, type)
+        if (upstreamAnswer.rcode == DnsWire.RCODE_NXDOMAIN) {
             cache.rememberNegative(key, UpstreamResolver.NEGATIVE_TTL_SECONDS)
-            return answer
+            return upstreamAnswer
         }
-        if (answer.rcode != DnsWire.RCODE_NOERROR || depth >= MAX_CNAME_HOPS) return answer
+        if (upstreamAnswer.rcode != DnsWire.RCODE_NOERROR) return upstreamAnswer
+
+        // Bailiwick: only records owned by the queried name or one of its subdomains may be cached
+        // or returned. An upstream answer carrying names from another zone must never poison the
+        // cache or leak into a response for a different query (B8).
+        val answer = DnsWire.Answer(
+            DnsWire.RCODE_NOERROR,
+            upstreamAnswer.records.filter { inBailiwick(it.name, name) },
+        )
+        if (depth >= MAX_CNAME_HOPS) return answer
         if (answer.records.isEmpty()) {
             // NODATA: cache it as negative so we do not keep asking upstream.
             cache.rememberNegative(key, UpstreamResolver.NEGATIVE_TTL_SECONDS)
@@ -116,18 +125,20 @@ internal class LocalDnsResolver(
         return DnsWire.Answer(DnsWire.RCODE_NOERROR, answer.records + next.records)
     }
 
-    /** SafeSearch: resolve the canonical target and return CNAME plus A/AAAA records. */
-    private fun rewrite(query: DnsQuery, target: String, udpPayloadSize: Int?): ByteArray {
-        if (query.question.type == DnsTypes.HTTPS || query.question.type == TYPE_SVCB) {
-            return DnsCodec.buildNoData(query)
-        }
+    private fun inBailiwick(owner: String, queried: String): Boolean =
+        owner.equals(queried, ignoreCase = true) ||
+            owner.endsWith(".$queried", ignoreCase = true)
 
-        val records = ArrayList<DnsRecord>()
-        for (type in listOf(DnsTypes.A, DnsTypes.AAAA)) {
-            val answer = resolveRecords(target, type, depth = 0)
-            if (answer.rcode != DnsWire.RCODE_NOERROR) return DnsCodec.buildServFail(query)
-            records.addAll(answer.records)
-        }
+    /** SafeSearch: resolve the canonical target and return CNAME plus records of the asked type. */
+    private fun rewrite(query: DnsQuery, target: String, udpPayloadSize: Int?): ByteArray {
+        val qtype = query.question.type
+        // HTTPS/SVCB and every other non-address type cannot be synthesized from a SafeSearch
+        // target; answering A or AAAA records to such a query would be malformed (B8).
+        if (qtype != DnsTypes.A && qtype != DnsTypes.AAAA) return DnsCodec.buildNoData(query)
+
+        val answer = resolveRecords(target, qtype, depth = 0)
+        if (answer.rcode != DnsWire.RCODE_NOERROR) return DnsCodec.buildServFail(query)
+        val records = answer.records.filter { it.type == qtype }
         if (records.isEmpty()) return DnsCodec.buildServFail(query)
 
         val ttl = records.minOf { it.ttlSeconds }
@@ -152,15 +163,38 @@ internal class LocalDnsResolver(
             if (record.type == DnsTypes.A && record.data.size == 4) {
                 val a = record.data[0].toInt() and 0xFF
                 val b = record.data[1].toInt() and 0xFF
-                if (a == 10 || a == 127 || (a == 172 && b in 16..31) ||
-                    (a == 192 && b == 168) || (a == 169 && b == 254) || (a == 0 && b == 0)
+                val c = record.data[2].toInt() and 0xFF
+                if (a == 0 || a == 10 || a == 127 || // unspecified, private, loopback
+                    (a == 172 && b in 16..31) || (a == 192 && b == 168) ||
+                    (a == 169 && b == 254) || // link local
+                    (a == 100 && b in 64..127) || // CGNAT (RFC 6598)
+                    (a == 192 && b == 0 && c == 0) || // IETF protocol assignments
+                    (a == 198 && (b == 18 || b == 19)) || // benchmarking (RFC 2544)
+                    (a == 192 && b == 0 && c == 2) ||
+                    (a == 198 && b == 51 && c == 100) ||
+                    (a == 203 && b == 0 && c == 113) || // documentation networks
+                    a >= 224 // multicast + reserved
                 ) return true
             }
             if (record.type == DnsTypes.AAAA && record.data.size == 16) {
                 val first = record.data[0].toInt() and 0xFF
                 val second = record.data[1].toInt() and 0xFF
                 if ((first and 0xFE) == 0xFC || (first == 0xFE && (second and 0xC0) == 0x80)) return true
-                if (record.data.take(15).all { it == 0.toByte() } && (record.data[15].toInt() and 0xFF) == 1) return true
+                if (record.data.take(15).all { it == 0.toByte() } &&
+                    (record.data[15].toInt() and 0xFF).let { it == 0 || it == 1 }
+                ) return true // unspecified :: and loopback ::1
+                if (first == 0xFF) return true // multicast
+                if (first == 0x20 && second == 0x01 && (record.data[2].toInt() and 0xFF) == 0x0D &&
+                    (record.data[3].toInt() and 0xFF) == 0xB8
+                ) return true // documentation 2001:db8::/32
+                // IPv4-mapped ::ffff:a.b.c.d: apply the IPv4 rules to the embedded address.
+                if (record.data.take(10).all { it == 0.toByte() } &&
+                    (record.data[10].toInt() and 0xFF) == 0xFF &&
+                    (record.data[11].toInt() and 0xFF) == 0xFF
+                ) {
+                    val mapped = record.data.copyOfRange(12, 16)
+                    if (containsPrivateAddress(listOf(DnsRecord("", DnsTypes.A, 1, 0, mapped)))) return true
+                }
             }
         }
         return false

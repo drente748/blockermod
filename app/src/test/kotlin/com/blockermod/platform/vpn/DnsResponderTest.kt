@@ -62,6 +62,27 @@ class DnsResponderTest {
     }
 
     @Test
+    fun `an address query rewrite only carries the asked record type`() {
+        val upstream = FakeUpstream(
+            mapOf(
+                "forcesafesearch.google.com/1" to
+                    listOf(DnsRecord("forcesafesearch.google.com", DnsTypes.A, 1, 60, byteArrayOf(93.toByte(), 184.toByte(), 216.toByte(), 34.toByte()))),
+                "forcesafesearch.google.com/28" to
+                    listOf(DnsRecord("forcesafesearch.google.com", DnsTypes.AAAA, 1, 60, ByteArray(16))),
+            ),
+        )
+        val responder = responder(
+            upstream = upstream,
+            safeSearchTable = InMemorySafeSearchTable(mapOf("www.google.com" to "forcesafesearch.google.com")),
+        )
+
+        val response = responder.respond(DnsWire.buildQuery(0x6111, "www.google.com", DnsTypes.A))
+
+        assertNotNull(response)
+        assertEquals(listOf(DnsTypes.CNAME, DnsTypes.A), answerTypes(response))
+    }
+
+    @Test
     fun `a rewrite of an https query answers with no data`() {
         val responder = responder(
             safeSearchTable = InMemorySafeSearchTable(mapOf("www.google.com" to "forcesafesearch.google.com")),

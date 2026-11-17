@@ -125,6 +125,43 @@ class LocalDnsResolverTest {
     }
 
     @Test
+    fun `a CGNAT address answer is rejected as rebinding`() {
+        val upstream = CountingUpstream { host, type ->
+            DnsWire.Answer(
+                DnsWire.RCODE_NOERROR,
+                listOf(DnsRecord(host, type, 1, 60, byteArrayOf(100.toByte(), 64, 0, 1))),
+            )
+        }
+        val resolver = resolver(upstream)
+
+        val response = resolver.resolve(DnsWire.buildQuery(22, "cgnat.example.com", DnsTypes.A))
+
+        assertNotNull(response)
+        assertEquals(2, rcode(response))
+    }
+
+    @Test
+    fun `out of bailiwick records are neither returned nor cached`() {
+        val upstream = CountingUpstream { host, type ->
+            DnsWire.Answer(
+                DnsWire.RCODE_NOERROR,
+                listOf(
+                    DnsRecord(host, type, 1, 60, byteArrayOf(93.toByte(), 184.toByte(), 216.toByte(), 34.toByte())),
+                    DnsRecord("evil.example.com", type, 1, 60, byteArrayOf(93.toByte(), 184.toByte(), 216.toByte(), 35.toByte())),
+                ),
+            )
+        }
+        val resolver = resolver(upstream)
+
+        val response = resolver.resolve(DnsWire.buildQuery(23, "ok.example.com", DnsTypes.A))
+
+        assertNotNull(response)
+        assertEquals(1, answerCount(response), "the unrelated owner must be dropped")
+        resolver.resolve(DnsWire.buildQuery(24, "evil.example.com", DnsTypes.A))
+        assertEquals(2, upstream.calls, "the poisoned record must not be cached")
+    }
+
+    @Test
     fun `DNS over TCP responses are length framed`() {
         val resolver = resolver(CountingUpstream())
 

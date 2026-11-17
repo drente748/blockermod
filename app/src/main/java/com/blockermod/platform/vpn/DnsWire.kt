@@ -40,6 +40,9 @@ internal object DnsWire {
     private const val TYPE_MX: Int = 15
     private const val TYPE_OPT: Int = 41
 
+    /** Upper bound on parsed answer records: a 16-bit count must not size an allocation (B8). */
+    internal const val MAX_ANSWERS: Int = 128
+
     /** EDNS(0) UDP payload size: fits in a 1280-byte IPv6 frame without fragmentation. */
     const val EDNS_PAYLOAD_SIZE: Int = 1232
 
@@ -105,6 +108,7 @@ internal object DnsWire {
 
         val questionCount = readU16(packet, 4)
         val answerCount = readU16(packet, 6)
+        if (answerCount > MAX_ANSWERS) return emptyList()
 
         var offset = HEADER_SIZE
         repeat(questionCount) {
@@ -113,7 +117,7 @@ internal object DnsWire {
             offset += 4
         }
 
-        val records = ArrayList<DnsRecord>(answerCount)
+        val records = ArrayList<DnsRecord>(answerCount.coerceAtMost(MAX_ANSWERS))
 
         repeat(answerCount) {
             val owner = readName(packet, offset) ?: return emptyList()
