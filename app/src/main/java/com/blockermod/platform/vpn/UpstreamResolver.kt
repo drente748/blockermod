@@ -8,6 +8,7 @@ import com.blockermod.core.dns.sameQuestion
 import com.blockermod.core.dns.frameDnsTcp
 import com.blockermod.core.dns.isDnsTruncated
 import java.io.IOException
+import java.security.SecureRandom
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetAddress
@@ -136,15 +137,22 @@ internal class UpstreamResolver(
     private val timeoutMillis: Int = TIMEOUT_MILLIS,
     private val tcpTimeoutMillis: Int = TCP_TIMEOUT_MILLIS,
     private val dnsPort: Int = DNS_PORT,
+    private val totalTimeoutMillis: Int = TOTAL_TIMEOUT_MILLIS,
 ) : DnsUpstream, AutoCloseable {
 
-    private val socket = ReusableDnsSocket(socketBinder)
-    // A single absolute deadline per TCP exchange, never renewed on each read.
-    private val tcpExchange = DnsTcpExchange(readTimeoutMillis = tcpTimeoutMillis)
+    // A small pool keeps concurrent lookups from queueing behind one @Synchronized exchange while
+    // still reusing sockets (one bind/binder call and fd per pool slot, not per query) (B7).
+    private val sockets = List(SOCKET_POOL_SIZE) { ReusableDnsSocket(socketBinder) }
+    private val nextSocket = AtomicInteger(0)
 
     override fun lookup(host: String, type: Int): DnsWire.Answer {
+        val deadlineNanos = System.nanoTime() + totalTimeoutMillis.toLong() * 1_000_000L
+        fun remainingMillis(): Int =
+            ((deadlineNanos - System.nanoTime()) / 1_000_000L).coerceAtLeast(1L)
+                .coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+
         val query = DnsWire.buildQuery(nextId(), host, type)
-        var response = exchange(query)
+        var response = exchange(query, minOf(timeoutMillis, remainingMillis()))
             ?: return DnsWire.Answer(DnsWire.RCODE_SERVFAIL, emptyList())
 
         // RFC 7766 §5 / RFC 9210 §3: a truncated UDP answer MUST be retried over TCP.
@@ -152,9 +160,11 @@ internal class UpstreamResolver(
             val network = activeNetwork()
             val servers = upstreamServers()
             for (server in servers) {
-                val transport = openTcpTransport(server, network) ?: continue
+                val budget = minOf(tcpTimeoutMillis, remainingMillis())
+                val transport = openTcpTransport(server, network, budget) ?: continue
                 transport.use { candidate ->
-                    when (val outcome = tcpExchange.exchange(candidate, query)) {
+                    val boundedExchange = DnsTcpExchange(readTimeoutMillis = budget)
+                    when (val outcome = boundedExchange.exchange(candidate, query)) {
                         is DnsTcpExchange.Outcome.Message -> {
                             response = outcome.bytes
                             return@use
@@ -164,6 +174,7 @@ internal class UpstreamResolver(
                 }
                 // A message with the matching ID was received; stop trying other servers.
                 if (!isDnsTruncated(response)) break
+                if (remainingMillis() <= 1) break
             }
             if (isDnsTruncated(response)) return DnsWire.Answer(DnsWire.RCODE_SERVFAIL, emptyList())
         }
@@ -179,7 +190,11 @@ internal class UpstreamResolver(
     }
 
     /** Opens a protected TCP socket for DNS retry; closed by the caller. */
-    private fun openTcpTransport(server: InetAddress, network: Any?): DnsTcpTransport? {
+    private fun openTcpTransport(
+        server: InetAddress,
+        network: Any?,
+        timeout: Int,
+    ): DnsTcpTransport? {
         if (network == null) return null
         var raw: java.net.Socket? = null
         return try {
@@ -187,8 +202,8 @@ internal class UpstreamResolver(
             // protect() is called through the same binder used by relays: never let the retry
             // socket re-enter the VPN.
             if (!tcpProtect(raw)) throw IOException("socket could not be protected")
-            raw.soTimeout = tcpTimeoutMillis
-            raw.connect(InetSocketAddress(server, dnsPort), tcpTimeoutMillis)
+            raw.soTimeout = timeout
+            raw.connect(InetSocketAddress(server, dnsPort), timeout)
             raw.tcpNoDelay = true
             val socket = raw
             object : DnsTcpTransport {
@@ -205,24 +220,27 @@ internal class UpstreamResolver(
     }
 
     /** Sends a raw query to the upstream servers and returns the raw answer. */
-    fun exchange(query: ByteArray): ByteArray? {
+    fun exchange(query: ByteArray, timeout: Int = timeoutMillis): ByteArray? {
         val network = activeNetwork()
         for (server in upstreamServers()) {
-            socket.exchange(query, server, network, timeoutMillis, dnsPort)?.let { return it }
+            val socket = sockets[nextSocket.getAndIncrement() % sockets.size]
+            socket.exchange(query, server, network, timeout, dnsPort)?.let { return it }
         }
         return null
     }
 
-    override fun close() = socket.close()
+    override fun close() = sockets.forEach { it.close() }
 
-    private fun nextId(): Int = IDS.incrementAndGet() and 0xFFFF
+    internal fun nextId(): Int = IDS.nextInt(0x10000)
 
     companion object {
         const val DNS_PORT: Int = 53
         const val TIMEOUT_MILLIS: Int = 4000
         const val MAX_RESPONSE_SIZE: Int = 4096
         const val TCP_TIMEOUT_MILLIS: Int = 3_000
+        const val TOTAL_TIMEOUT_MILLIS: Int = 5_000
         const val NEGATIVE_TTL_SECONDS: Long = 60L
-        private val IDS = AtomicInteger(1)
+        const val SOCKET_POOL_SIZE: Int = 4
+        private val IDS = SecureRandom()
     }
 }
