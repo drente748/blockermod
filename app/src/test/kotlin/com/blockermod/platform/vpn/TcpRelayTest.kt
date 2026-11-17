@@ -36,6 +36,29 @@ class TcpRelayTest {
     )
 
     @Test
+    fun `server data honors the client receive window`() {
+        val relay = relay()
+        val syn = seg(seq = 100L, flags = Ipv4TcpCodec.Flags.SYN)
+        relay.handle(syn)
+        val connection = relay.findConnection(syn)!!
+        val data = ByteArray(5000) { 1 }
+
+        // A closed window parks the pump: no segment may be injected.
+        relay.handle(seg(seq = 101L, window = 0))
+        written.reset()
+        relay.injectServerData(connection, data)
+        assertEquals(0, packets().size, "zero window must inject nothing")
+
+        // A small window emits at most that many bytes and retains the rest for a later ACK.
+        relay.handle(seg(seq = 101L, window = 100))
+        written.reset()
+        relay.injectServerData(connection, data)
+        val emitted = packets().sumOf { it.payload.size }
+        assertTrue(emitted in 1..100, "only the advertised window may be injected (was $emitted)")
+        assertTrue(connection.send.pendingByteCount() > 0, "unemitted bytes stay queued")
+    }
+
+    @Test
     fun `syn is answered with syn ack and registers a connection`() {
         val relay = relay()
         relay.handle(seg(seq = 100L, flags = Ipv4TcpCodec.Flags.SYN))
@@ -224,6 +247,7 @@ class TcpRelayTest {
         port: Int = 44_444,
         flags: Int = Ipv4TcpCodec.Flags.ACK,
         payload: ByteArray = ByteArray(0),
+        window: Int = 65_535,
     ): Ipv4TcpPacket = Ipv4TcpPacket(
         sourceAddress = 0x0A000001,
         destinationAddress = 0x0A000002,
@@ -232,7 +256,7 @@ class TcpRelayTest {
         sequenceNumber = seq,
         acknowledgmentNumber = 0L,
         flags = flags,
-        window = 65_535,
+        window = window,
         payload = payload,
         identification = 1,
         ttl = 64,

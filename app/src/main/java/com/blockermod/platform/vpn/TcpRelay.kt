@@ -3,12 +3,15 @@ package com.blockermod.platform.vpn
 import com.blockermod.core.net.Ipv4TcpCodec
 import com.blockermod.core.net.Ipv4TcpPacket
 import com.blockermod.core.net.TcpStreamBuffer
+import com.blockermod.core.net.TcpSendQueue
 import com.blockermod.core.policy.TransportPolicy
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Socket
 import java.net.SocketException
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.locks.ReentrantLock
+import kotlin.concurrent.withLock
 import kotlin.random.Random
 
 /**
@@ -30,29 +33,31 @@ internal class TcpRelay(
     private val nowMillis: () -> Long = { System.currentTimeMillis() },
 ) {
 
-    private data class Key(
+    internal data class Key(
         val sourceAddress: Int,
         val sourcePort: Int,
         val destinationAddress: Int,
         val destinationPort: Int,
     )
 
-    private inner class Connection(
+    internal inner class Connection(
         val key: Key,
         val ourIsn: Long,
         var request: Ipv4TcpPacket,
     ) {
         val stream = TcpStreamBuffer()
+        val send = TcpSendQueue(isn = ourIsn, mss = MSS)
+        var clientWindow: Int = 65_535
         var lastActivityMillis: Long = nowMillis()
         var socket: Socket? = null
-        var serverBytes: Long = 0L
         var tlsDecision: TlsInspection = TlsInspection.UNKNOWN
         var tlsName: String? = null
         var policyDecided: Boolean = false
         var closed: Boolean = false
-        val lock = Any()
+        val lock = ReentrantLock()
+        val space = lock.newCondition()
 
-        fun nextServerSeq(): Long = (ourIsn + 1L + serverBytes) and 0xFFFFFFFFL
+        fun nextServerSeq(): Long = send.sndNxt
     }
 
     private val connections = ConcurrentHashMap<Key, Connection>()
@@ -106,7 +111,7 @@ internal class TcpRelay(
             }
             val connection = Connection(key, nextIsn(), packet)
             connections[key] = connection
-            synchronized(connection.lock) {
+            connection.lock.withLock {
                 connection.stream.start(packet.sequenceNumber)
                 sendSynAck(packet, connection)
             }
@@ -117,10 +122,18 @@ internal class TcpRelay(
             writePacket(Ipv4TcpCodec.reset(packet))
             return
         }
-        synchronized(connection.lock) {
-            if (connection.closed) return@synchronized
+        connection.lock.withLock {
+            if (connection.closed) return@withLock
             connection.request = packet
             connection.lastActivityMillis = nowMillis()
+            if (ack) {
+                // Track the client's advertised window and acknowledged server bytes: the pump
+                // waits on this monitor while the window is closed and resumes on ACK/WINDOW updates
+                // (B5). No timers or polling — progress is driven by incoming packets.
+                connection.send.onAck(packet.acknowledgmentNumber)
+                connection.clientWindow = packet.window
+                connection.space.signalAll()
+            }
 
             val accepted = connection.stream.accept(packet.sequenceNumber, packet.payload, fin)
             // accepted == null means either a duplicate/gap OR a pure ACK/FIN (no payload). Only a
@@ -128,13 +141,13 @@ internal class TcpRelay(
             // sequence was not in order must NOT close the flow or buffered data would be lost.
             if (accepted == null && !connection.stream.inputClosed) {
                 if (!packet.payload.isEmpty() || fin) sendAck(packet, connection)
-                return@synchronized
+                return@withLock
             }
             if (accepted != null && !connection.policyDecided) {
                 // Inspect the WHOLE accumulated stream, not just this segment: a ClientHello split
                 // across segments must still be recognized as SNI / ECH.
                 inspectClientData(connection, packet, connection.stream.buffered())
-                if (connection.closed) return@synchronized
+                if (connection.closed) return@withLock
             }
 
             if (connection.policyDecided && connection.stream.bufferedSize() > 0) {
@@ -144,16 +157,16 @@ internal class TcpRelay(
                 if (connection.socket == null && !connect(connection)) {
                     writePacket(Ipv4TcpCodec.reset(packet))
                     close(connection)
-                    return@synchronized
+                    return@withLock
                 }
                 try {
-                    val out = connection.socket?.getOutputStream() ?: return@synchronized
+                    val out = connection.socket?.getOutputStream() ?: return@withLock
                     out.write(pending)
                     out.flush()
                 } catch (exception: Exception) {
                     writePacket(Ipv4TcpCodec.reset(packet))
                     close(connection)
-                    return@synchronized
+                    return@withLock
                 }
             }
             if (connection.stream.inputClosed) {
@@ -211,6 +224,44 @@ internal class TcpRelay(
             connection.policyDecided = true
         }
     }
+
+    /**
+     * Queues one upstream segment and emits only what fits in the client's advertised window.
+     * A closed window or a full bounded queue parks the pump on the connection monitor until an
+     * incoming ACK/WINDOW update (or close) wakes it — no timers, no polling (B5).
+     */
+    internal fun injectServerData(connection: Connection, segment: ByteArray) {
+        connection.lock.withLock {
+            while (!connection.closed) {
+                if (connection.clientWindow <= 0 && connection.send.pendingByteCount() > 0) {
+                    connection.space.await()
+                    continue
+                }
+                if (!connection.send.queue(segment)) {
+                    connection.space.await()
+                    continue
+                }
+                break
+            }
+            if (connection.closed) return
+            connection.send.flush(connection.clientWindow) { seq, data ->
+                writePacket(
+                    Ipv4TcpCodec.build(
+                        request = connection.request,
+                        payload = data,
+                        sequenceNumber = seq,
+                        acknowledgmentNumber = connection.stream.expectedSequence,
+                        flags = Ipv4TcpCodec.Flags.PSH or Ipv4TcpCodec.Flags.ACK,
+                    ),
+                )
+            }
+            connection.lastActivityMillis = nowMillis()
+        }
+    }
+
+    /** Test seam: the flow for a packet, used to drive the server-data path without a socket. */
+    internal fun findConnection(packet: Ipv4TcpPacket): Connection? =
+        connections[Key(packet.sourceAddress, packet.sourcePort, packet.destinationAddress, packet.destinationPort)]
 
     private fun sendSynAck(packet: Ipv4TcpPacket, connection: Connection) {
         writePacket(
@@ -291,21 +342,12 @@ internal class TcpRelay(
                 if (count < 0) break
                 if (count == 0) continue
                 val segment = buffer.copyOf(count)
-                synchronized(connection.lock) {
-                    writePacket(
-                        Ipv4TcpCodec.build(
-                            request = connection.request,
-                            payload = segment,
-                            sequenceNumber = connection.nextServerSeq(),
-                            acknowledgmentNumber = connection.stream.expectedSequence,
-                            flags = Ipv4TcpCodec.Flags.PSH or Ipv4TcpCodec.Flags.ACK,
-                        ),
-                    )
-                    connection.serverBytes = (connection.serverBytes + count.toLong()) and 0xFFFFFFFFL
-                    connection.lastActivityMillis = nowMillis()
-                }
+                injectServerData(connection, segment)
             }
-            synchronized(connection.lock) {
+            connection.lock.withLock {
+                // FIN consumes the next server sequence number, so hold it until every queued byte
+                // has been acknowledged (otherwise its sequence number would be wrong).
+                while (!connection.closed && !connection.send.allAcked()) connection.space.await()
                 if (!connection.closed) {
                     writePacket(
                         Ipv4TcpCodec.build(
@@ -333,9 +375,10 @@ internal class TcpRelay(
 
     private fun close(connection: Connection?) {
         if (connection == null) return
-        synchronized(connection.lock) {
+        connection.lock.withLock {
             if (connection.closed) return
             connection.closed = true
+            connection.space.signalAll() // release a pump parked on a zero window / full queue
         }
         // Centralize table cleanup: FIN, RST, connect failure and idle reaping all funnel here, so
         // a closed flow can never remain counted against MAX_CONNECTIONS.
