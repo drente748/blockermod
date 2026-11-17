@@ -2,7 +2,9 @@ package com.blockermod.ui
 
 import android.app.Activity
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.VpnService
+import android.os.Build
 import android.os.Bundle
 import android.view.View
 import android.widget.Button
@@ -47,6 +49,19 @@ class MainActivity : Activity() {
         }
         findViewById<Button>(R.id.onboardingButton).setOnClickListener {
             startActivity(Intent(this, OnboardingActivity::class.java))
+        }
+        requestNotificationPermissionIfNeeded()
+    }
+
+    /** The foreground-service notification is invisible on Android 13+ without this grant. */
+    private fun requestNotificationPermissionIfNeeded() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            requestPermissions(
+                arrayOf(android.Manifest.permission.POST_NOTIFICATIONS),
+                REQUEST_NOTIFICATIONS,
+            )
         }
     }
 
@@ -125,5 +140,6 @@ class MainActivity : Activity() {
 
     private companion object {
         const val REQUEST_CONSENT: Int = 4711
+        const val REQUEST_NOTIFICATIONS: Int = 4712
     }
 }

@@ -23,6 +23,9 @@ internal object AppSettings {
     /** Key of the experimental full-tunnel switch. */
     private const val KEY_FULL_TUNNEL = "full_tunnel_enabled"
 
+    /** Key of the optional, off-by-default QUIC/HTTP3 block. */
+    private const val KEY_BLOCK_QUIC = "block_quic_enabled"
+
     /**
      * True when the safe search rewrite is enabled; it is enabled by default.
      */
@@ -58,6 +61,17 @@ internal object AppSettings {
 
     fun setFullTunnelEnabled(context: Context, enabled: Boolean) {
         preferences(context).edit { putBoolean(KEY_FULL_TUNNEL, enabled) }
+    }
+
+    /**
+     * Blocks UDP/443 globally. Off by default: QUIC carries HTTP/3 for the whole web, so blocking it
+     * breaks normal sites and forces fallback to TCP. Only enable with a deliberate decision.
+     */
+    fun blockQuicEnabled(context: Context): Boolean =
+        preferences(context).getBoolean(KEY_BLOCK_QUIC, false)
+
+    fun setBlockQuicEnabled(context: Context, enabled: Boolean) {
+        preferences(context).edit { putBoolean(KEY_BLOCK_QUIC, enabled) }
     }
 
     private fun preferences(context: Context) =

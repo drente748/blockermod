@@ -12,7 +12,7 @@ import java.util.concurrent.atomic.AtomicBoolean
  * UDP relay for the full-tunnel engine: forwards allowed UDP flows through protected sockets and
  * injects the replies back into the tunnel.
  */
-internal class UdpRelay(
+internal open class UdpRelay(
     private val protectSocket: (DatagramSocket) -> Boolean,
     private val writePacket: (ByteArray) -> Unit,
     private val timeoutMillis: Int = 30_000,
@@ -31,8 +31,11 @@ internal class UdpRelay(
 
     private val flows = ConcurrentHashMap<Key, Flow>()
 
+    /** Number of live UDP flows, exposed for tests and resource monitoring. */
+    fun flowCount(): Int = flows.size
+
     /** Forwards one UDP datagram. Called from the tunnel worker pool. */
-    fun handle(packet: com.blockermod.core.net.Ipv4UdpPacket) {
+    open fun handle(packet: com.blockermod.core.net.Ipv4UdpPacket) {
         val key = Key(packet.sourceAddress, packet.sourcePort, packet.destinationAddress, packet.destinationPort)
         // Each flow owns a socket and a blocking-read thread; cap them to protect the device.
         if (!flows.containsKey(key) && flows.size >= MAX_FLOWS) return

@@ -27,6 +27,9 @@
     <string name="full_tunnel_label">Full tunnel (experimental)</string>
     <string name="full_tunnel_hint">Captures all IPv4 traffic to stop DoH by name and port. Uses more battery. Restart protection to apply.</string>
 
+    <string name="block_quic_label">Block QUIC / HTTP3 (optional)</string>
+    <string name="block_quic_hint">Blocks UDP/443 for all destinations. DoQ on UDP/853 is always blocked. Blocking QUIC can break normal sites and forces them to TCP.</string>
+
     <string name="onboarding_restricted_settings_title">Allow restricted settings (Android 13 and newer)</string>
     <string name="onboarding_restricted_settings_body">Open the system settings, choose Apps, then BlockerMod, then Allow restricted settings. Without it the system refuses to start the protection on its own after a reboot.</string>
     <string name="onboarding_install_title">Install anyway (Play Protect)</string>

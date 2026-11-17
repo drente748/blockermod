@@ -23,7 +23,25 @@ jobs:
         run: chmod +x gradlew
 
       - name: Test and build
-        run: ./gradlew :core:test :app:testDebugUnitTest :app:assembleDebug :app:lintDebug
+        run: ./gradlew :core:test :app:testDebugUnitTest :app:assembleDebug :app:assembleRelease :app:lintDebug
+
+      - name: IPv6 fails closed in full tunnel
+        run: |
+          # Full tunnel must not let IPv6 fall through to the underlying network unfiltered.
+          # The engine has no IPv6 codec, so allowing AF_INET6 would bypass the policy entirely.
+          if grep -rn "allowFamily.*AF_INET6" app/src/; then
+            echo "::error::IPv6 must not be allowed to bypass the tunnel (fail closed)"
+            exit 1
+          fi
+
+      - name: DoQ uses the dedicated UDP/853 port in the policy
+        run: |
+          # UDP/853 must be classified as DoQ by the testable transport policy, not scattered
+          # across relays. Behaviour is asserted by TransportPolicyTest and VpnTunnelIntegrationTest.
+          if ! grep -rn "UDP_DOQ_853" core/src/main/; then
+            echo "::error::DoQ transport classification is missing"
+            exit 1
+          fi
 
       - name: R1 default route only in full-tunnel mode
         run: |
@@ -81,7 +99,7 @@ jobs:
 
       - name: R10 no logging in the packet path
         run: |
-          if grep -rn "Log\.\|println(" app/src/main/java/com/blockermod/platform/vpn/VpnTunnel.kt app/src/main/java/com/blockermod/platform/vpn/DnsResponder.kt app/src/main/java/com/blockermod/platform/vpn/UpstreamResolver.kt app/src/main/java/com/blockermod/platform/vpn/DnsCache.kt app/src/main/java/com/blockermod/platform/vpn/DnsWire.kt; then
+          if grep -rn "Log\.\|println(" app/src/main/java/com/blockermod/platform/vpn/VpnTunnel.kt app/src/main/java/com/blockermod/platform/vpn/DnsResponder.kt app/src/main/java/com/blockermod/platform/vpn/UpstreamResolver.kt app/src/main/java/com/blockermod/platform/vpn/DnsCache.kt app/src/main/java/com/blockermod/platform/vpn/DnsWire.kt app/src/main/java/com/blockermod/platform/vpn/TcpRelay.kt app/src/main/java/com/blockermod/platform/vpn/UdpRelay.kt app/src/main/java/com/blockermod/platform/vpn/DnsTcpEndpoint.kt app/src/main/java/com/blockermod/platform/vpn/TlsSniInspector.kt; then
             echo "::error::logging was found in the packet path"
             exit 1
           fi

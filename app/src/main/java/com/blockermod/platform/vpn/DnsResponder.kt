@@ -32,8 +32,8 @@ internal class DnsResponder(
         return response
     }
 
-    /** Fully resolves a DNS-over-TCP message; returns a framed response, or null when malformed. */
-    fun resolveTcp(framed: ByteArray): ByteArray? = resolver.resolveFramed(framed)
+    /** Resolves a raw DNS message (already unframed); returns a raw DNS response or null. */
+    fun resolveDnsMessage(message: ByteArray): ByteArray? = resolver.resolve(message)
 
     /** The bypass list, used by the full-tunnel relay to stop DoH by TLS SNI. */
     fun bypassMatcher(): DomainMatcher = resolver.bypassMatcher()

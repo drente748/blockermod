@@ -13,7 +13,6 @@ import android.net.NetworkRequest
 import android.net.VpnService
 import android.os.Build
 import android.os.ParcelFileDescriptor
-import android.system.OsConstants
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.blockermod.R
@@ -21,12 +20,16 @@ import com.blockermod.core.BlockReason
 import com.blockermod.core.BlockingState
 import com.blockermod.core.matcher.InMemoryDomainMatcher
 import com.blockermod.core.lockout.NoOpLockoutPolicy
+import com.blockermod.core.policy.NetworkCandidate
+import com.blockermod.core.policy.NetworkSelector
 import com.blockermod.core.policy.PolicyEngine
+import com.blockermod.core.policy.TransportPolicy
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.IOException
 import java.net.DatagramSocket
 import java.net.InetAddress
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
 
 /**
@@ -49,10 +52,13 @@ class BlockerVpnService : VpnService() {
     private val tunnelOutputLock = Any()
 
     private val upstreamServers = CopyOnWriteArrayList<InetAddress>()
-    private val physicalNetworks = CopyOnWriteArrayList<Network>()
+    private val networkCandidates = ConcurrentHashMap<String, NetworkCandidate>()
+    private val networkObjects = ConcurrentHashMap<String, Network>()
+    private val selector = NetworkSelector()
 
     @Volatile
     private var physicalNetwork: Network? = null
+    private var selectedNetworkId: String? = null
 
     @Volatile
     private var privateDnsActive: Boolean = false
@@ -102,7 +108,6 @@ class BlockerVpnService : VpnService() {
                     writePacket = { packet -> writeTunnelPacket(packet) },
                     dohHosts = created.bypassMatcher(),
                     onDohBlocked = { EngineStatus.recordBlocked() },
-                    dnsPolicy = { framed -> created.resolveTcp(framed) },
                 )
             } else null
             val udpRelay = if (fullTunnel) {
@@ -114,6 +119,15 @@ class BlockerVpnService : VpnService() {
 
             val output = FileOutputStream(descriptor.fileDescriptor)
             tunnelOutput = output
+            val dnsTcpEndpoint = DnsTcpEndpoint(
+                writePacket = { packet -> writeTunnelPacket(packet) },
+                resolve = { message -> created.resolveDnsMessage(message) },
+            )
+            val transportPolicy = TransportPolicy(
+                isKnownEncryptedResolver = { ip -> StrictResolverIps.containsAddress(ip) },
+                dohHosts = created.bypassMatcher(),
+                blockAllQuic = AppSettings.blockQuicEnabled(this),
+            )
             val started = VpnTunnel(
                 input = FileInputStream(descriptor.fileDescriptor),
                 output = output,
@@ -121,6 +135,8 @@ class BlockerVpnService : VpnService() {
                 fullTunnel = fullTunnel,
                 tcpRelay = tcpRelay,
                 udpRelay = udpRelay,
+                dnsTcpEndpoint = dnsTcpEndpoint,
+                transportPolicy = transportPolicy,
             )
             started.start()
             tunnel = started
@@ -174,11 +190,10 @@ class BlockerVpnService : VpnService() {
 
         if (fullTunnel) {
             // Full capture: every IPv4 packet enters the tunnel and is relayed or filtered.
+            // IPv6 is intentionally NOT allowed: with no IPv6 address/route in the builder Android
+            // blocks that family instead of letting it bypass the policy unfiltered (fail closed).
+            // This can break IPv6-only networks; documented as a known limitation.
             builder.addRoute("0.0.0.0", 0)
-            // Android blocks an address family that has no address/route/DNS server in the builder.
-            // Let IPv6 fall through to the underlying network so dual-stack devices keep working;
-            // IPv6 is not filtered by this engine (documented limitation).
-            builder.allowFamily(OsConstants.AF_INET6)
         }
 
         // Pin the tunnel to the single physical network we bind upstream sockets to. Without this
@@ -196,10 +211,13 @@ class BlockerVpnService : VpnService() {
 
     /** Writes a packet directly to the tunnel from a relay thread. */
     private fun writeTunnelPacket(packet: ByteArray) {
-        synchronized(tunnelOutputLock) {
+        // VpnTunnel also synchronizes on this exact OutputStream for local DNS answers. Sharing the
+        // monitor prevents relay threads and tunnel workers from interleaving bytes of TUN frames.
+        val output = tunnelOutput ?: return
+        synchronized(output) {
             try {
-                tunnelOutput?.write(packet)
-                tunnelOutput?.flush()
+                output.write(packet)
+                output.flush()
             } catch (exception: IOException) {
                 // the tunnel is closing
             }
@@ -249,6 +267,7 @@ class BlockerVpnService : VpnService() {
         val cache = DnsCache()
         val resolver = UpstreamResolver(
             socketBinder = { socket -> bindToPhysicalNetwork(socket) },
+            tcpProtect = { socket -> protect(socket) },
             upstreamServers = { upstreamServers.toList() },
             activeNetwork = { physicalNetwork },
         )
@@ -333,74 +352,129 @@ class BlockerVpnService : VpnService() {
     private fun registerNetworkCallback() {
         val manager = getSystemService(ConnectivityManager::class.java) ?: return
 
+        // All data comes from the callback arguments; no synchronous ConnectivityManager lookups
+        // from inside the callback (those can be stale and block the callback thread).
         val callback = object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) {
-                if (isTunnel(network)) return
-                physicalNetworks.addIfAbsent(network)
-                physicalNetwork = network
-                applyUnderlyingNetwork(network)
-                manager.getLinkProperties(network)?.let { updateLinkProperties(it) }
+                record(network, null, null)
+            }
+
+            override fun onCapabilitiesChanged(network: Network, capabilities: NetworkCapabilities) {
+                record(network, capabilities, null)
             }
 
             override fun onLinkPropertiesChanged(network: Network, linkProperties: LinkProperties) {
-                if (isTunnel(network)) return
-                physicalNetworks.addIfAbsent(network)
-                physicalNetwork = network
-                updateLinkProperties(linkProperties)
+                record(network, null, linkProperties)
+            }
+
+            override fun onLosing(network: Network, maxMsToLive: Int) {
+                val id = network.toString()
+                val current = networkCandidates[id] ?: return
+                networkCandidates[id] = current.copy(isLosing = true)
+                reselect()
             }
 
             override fun onLost(network: Network) {
-                physicalNetworks.remove(network)
-                if (network != physicalNetwork) return
-
-                val remaining = physicalNetworks.firstOrNull()
-                physicalNetwork = remaining
-                applyUnderlyingNetwork(remaining)
-                if (remaining == null) {
-                    upstreamServers.clear()
-                } else {
-                    manager.getLinkProperties(remaining)?.let { updateLinkProperties(it) }
-                }
+                val id = network.toString()
+                networkCandidates.remove(id)
+                networkObjects.remove(id)
+                reselect()
             }
         }
 
-        // The default network becomes the tunnel itself once it is established, and its only DNS
-        // server is our virtual address: resolving through it would loop straight back into the
-        // tunnel. Ask for a network that is explicitly not a VPN.
         manager.registerNetworkCallback(PHYSICAL_NETWORK_REQUEST, callback)
         networkCallback = callback
     }
 
-    private fun isTunnel(network: Network): Boolean =
-        getSystemService(ConnectivityManager::class.java)
-            ?.getNetworkCapabilities(network)
-            ?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true
+    /** Merges callback data into the network registry, then recomputes the selected upstream. */
+    private fun record(
+        network: Network,
+        capabilities: NetworkCapabilities?,
+        linkProperties: LinkProperties?,
+    ) {
+        val id = network.toString()
+        networkObjects[id] = network
+        val previous = networkCandidates[id]
+        val isVpn = capabilities?.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
+            ?: previous?.isVpn ?: false
+        if (isVpn) {
+            networkCandidates.remove(id)
+            networkObjects.remove(id)
+            reselect()
+            return
+        }
+        val hasInternet = capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            ?: previous?.hasInternet ?: false
+        val validated = capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+            ?: previous?.isValidated ?: false
+        val dns = linkProperties?.dnsServers
+            ?.filterNot { it.hostAddress == VIRTUAL_DNS_ADDRESS }
+            ?.map { it.hostAddress ?: "" }
+            ?.filter { it.isNotEmpty() }
+            ?: previous?.dnsServers ?: emptyList()
+        val privateDns = linkProperties?.let {
+            android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P && it.isPrivateDnsActive
+        } ?: previous?.isPrivateDnsActive ?: false
+        networkCandidates[id] = NetworkCandidate(
+            id = id,
+            hasInternet = hasInternet,
+            isVpn = false,
+            isValidated = validated,
+            dnsServers = dns,
+            isPrivateDnsActive = privateDns,
+        )
+        reselect()
+    }
+
+    /** Applies the selection policy; clears stale DNS and caches on any upstream change. */
+    private fun reselect() {
+        val selected = selector.select(networkCandidates.values, selectedNetworkId)
+        val newId = selected?.id
+        val changed = newId != selectedNetworkId
+        val newNetwork = newId?.let { networkObjects[it] }
+        val networkObjectChanged = newNetwork !== physicalNetwork
+        selectedNetworkId = newId
+        physicalNetwork = newNetwork
+
+        // Re-apply the pin whenever the underlying Network object changes OR the id changes. A
+        // replacement Network under the same string id (or a previously rejected pin) must not stay
+        // stale just because selectedNetworkId happens to be unchanged.
+        if (changed || networkObjectChanged) {
+            applyUnderlyingNetwork(physicalNetwork)
+        }
+        if (changed) {
+            // A resolver from the previous network is invalid on the new one: drop ALL cached
+            // answers, positive and negative, before any further lookup.
+            responder?.clearCache()
+        }
+
+        val servers = selected?.dnsServers?.mapNotNull { parseAddress(it) } ?: emptyList()
+        if (servers.toList() != upstreamServers.toList()) {
+            upstreamServers.clear()
+            upstreamServers.addAll(servers)
+            responder?.clearCache()
+        }
+        privateDnsActive = selected?.isPrivateDnsActive ?: false
+        EngineStatus.publishPrivateDns(privateDnsActive)
+    }
+
+    private fun parseAddress(value: String): InetAddress? = try {
+        InetAddress.getByName(value)
+    } catch (exception: Exception) {
+        null
+    }
 
     private fun unregisterNetworkCallback() {
         val manager = getSystemService(ConnectivityManager::class.java)
         val callback = networkCallback ?: return
         manager.unregisterNetworkCallback(callback)
         networkCallback = null
-        physicalNetworks.clear()
+        networkCandidates.clear()
+        networkObjects.clear()
         physicalNetwork = null
+        selectedNetworkId = null
         upstreamServers.clear()
-    }
-
-    private fun updateLinkProperties(linkProperties: LinkProperties) {
-        val servers = linkProperties.dnsServers.filterNot { it.hostAddress == VIRTUAL_DNS_ADDRESS }
-        if (servers.isNotEmpty() && servers.toList() != upstreamServers.toList()) {
-            upstreamServers.clear()
-            upstreamServers.addAll(servers)
-            // Answers learned from the old network's resolvers are stale after a handover.
-            responder?.clearCache()
-        }
-
-        privateDnsActive = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            linkProperties.isPrivateDnsActive
-        } else {
-            false
-        }
-        EngineStatus.publishPrivateDns(privateDnsActive)
+        responder?.clearCache()
     }
 
     private fun createNotificationChannel() {

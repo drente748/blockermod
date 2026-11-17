@@ -2,6 +2,29 @@
 
 سجل زمني للتغييرات. كل جولة عمل تُسجَّل هنا.
 
+## Unreleased - جولة القرارات النهائية وإغلاق كل القرارات المفتوحة
+
+### Changed (قرارات نهائية)
+
+- **IPv6 في Full Tunnel**: أُلغي `allowFamily(AF_INET6)`. القرار النهائي هو **الفشل المغلق**
+  (لا تسرب IPv6 غير مُعالَج). السجل أدناه كان يشير إلى عكس ذلك؛ أُلغي بقرار نهائي.
+- **التوقيع**: v2 فقط (minSdk 26) — أُزيل `isV1SigningEnabled` لأن AGP لا يُنتج v1 لهذا minSdk.
+- **R8/التصغير**: قرار نهائي معطّل (صحة التنفيذ أهم من توفير حجم هامشي بلا تحقق جهازي).
+- **سياسة الاتصال/الخصوصية/Lockout/Device Owner**: كلها قرارات نهائية مغلقة — انظر
+  `docs/ARCHITECTURE.md` §17 و`README.md`. لا قرار مفتوح بعد الآن.
+
+### Fixed (من جولات التدقيق الأخيرة)
+
+- `EXT_ESNI` كان `0x0A` (supported_groups) ⇒ تعطيل حظر DoH بـ SNI؛ صُحّح إلى `0xFFCE`.
+- `isDnsTruncated` كان يفحص RCODE بدل بت TC؛ صُحّح. تسريب fd في relay/upstream؛ أُغلق.
+- SYN المُعاد → SYN-ACK؛ FIN بفجوة لا يُسقط بيانات؛ DnsTcpExchange يتحقق من QR.
+- `reapIdle` مُقنَّن زمنيًا (لا مسح O(n) لكل حزمة)؛ مقبس relay بلا read-timeout (لا churn).
+
+### Verified
+
+- **205 اختبار** (138 core + 67 app)، lint `No issues found`، assembleDebug/Release SUCCESS،
+  `apksigner verify` PASS (v2، CN=BlockerMod).
+
 ## Unreleased - Pre-commit audit fixes
 
 ### Fixed

@@ -28,8 +28,19 @@
   الطلب إلى الاسم الأصلي.
 - **وضع LOG_ONLY**: يحل كل استعلام، ويسجّل القرار، ولا يحجب شيئًا. التسجيل يتم في `DecisionTrail`
   بلا تنسيق نصوص داخل مسار الحزم، والتنسيق يحدث عند إيقاف النفق.
-- **TCP على منفذ 53**: خارج النطاق؛ يُعدّ ولا يُخدم (الردّ الصحيح برمجيًا هو `TC=1` لكن النفق
-  لا يخدم TCP).
+- **DNS عبر TCP (RFC 7766/9210)**: إلزامي في كلا الوضعين. `DnsTcpEndpoint` يعيد تجميع التدفق
+  حسب sequence number، ويفرّم `[length:2][message]` عبر `DnsTcpFramer` (رسائل مجزّأة/متعددة/
+  متزامنة/مكرّرة/خارج الترتيب)، ويحدّ الذاكرة، ويطبّق نفس `LocalDnsResolver`.
+
+## قواعد إضافية لهذه الجولة
+
+| # | القاعدة | آلية الفرض | الملف |
+|---|---|---|---|
+| R12 | فريم DNS-over-TCP صحيح، مطابقة Message ID، وحدود للرسائل/الذاكرة؛ TC=1 يُعاد عبر TCP مع مهلة | اختبارات وحدة (`DnsTcpFramerTest`, `DnsTcpExchangeTest`, `DnsTcpEndpointTest`) | `core/.../DnsTcpFramer.kt`، `DnsTcpExchange.kt`، `app/.../DnsTcpEndpoint.kt`، `UpstreamResolver.kt` |
+| R13 | سياسة نقل موحّدة: DoT/DoQ 853 محجوعان، UDP/443 يُحظر لعناوين DNS معروفة أو بخيار صريح (افتراضيًا مغلق)، ولا ادعاء باكتشاف ECH | اختبارات وحدة + `grep` في CI | `core/.../TransportPolicy.kt`، `app/.../VpnTunnel.kt` |
+| R14 | IPv6 فشل مغلق في Full Tunnel: لا `allowFamily(AF_INET6)` ولا مسار IPv6؛ الحزم غير المُعالجة تُسقط | `grep` في CI + اختبار وحدة | `BlockerVpnService.kt`، `VpnTunnelIntegrationTest.kt` |
+| R15 | ترتيب لكل تدفّق TCP (striped FIFO) دون إلغاء التوازي بين التدفقات، وتنظيف مركزي للاتصالات الخاملة/المغلقة | اختبارات وحدة | `VpnTunnel.kt`، `TcpRelayTest.kt` |
+| R16 | Handover يعتمد فقط على بيانات `NetworkCallback`، ويُفرّغ DNS والكاش القديم عند أي تغيير upstream | اختبار وحدة للسياسة + مراجعة كود (جهاز مطلوب للتحقق الكامل) | `core/.../NetworkSelector.kt`، `BlockerVpnService.kt` |
 - **الحظر الصارم للعناوين (Strict Resolver IPs)**: **مفعّل**
   (`StrictResolverIps.STRICT_RESOLVER_IPS_ENABLED = true`) بـ 12 عنوان حلّال عام. تُوجَّه هذه
   العناوين إلى النفق ويُسقط عليها كل منفذ إلا 53 (أي 853 و 443)، **قبل** فحص منفذ DNS حتى لا يكون
@@ -50,7 +61,9 @@
 
 | الفحص | ما يرفضه |
 |---|---|
-| R1 | مسار افتراضي (`0.0.0.0/0` أو `::/0`) |
+| R1 | مسار IPv6 افتراضي `::/0` (سمة `0.0.0.0/0` مسموحة صراحةً في Full Tunnel التجريبي) |
+| IPv6 fails closed | استدعاء `allowFamily(...AF_INET6)` في أي مكان في `app/src/` |
+| DoQ classification | غياب تصنيف `UDP_DOQ_853` في `:core` |
 | R4 | آلية جدولة أو إيقاظ داخل النفق |
 | R5 | وصول عميق لتطبيقات أخرى |
 | R10 | اسم مضيف SafeSearch مكتوب في الكود |

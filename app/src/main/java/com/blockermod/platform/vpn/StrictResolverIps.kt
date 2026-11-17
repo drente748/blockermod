@@ -52,6 +52,9 @@ internal object StrictResolverIps {
     /** True when the port must be dropped for strict resolvers. */
     fun isDroppedPort(port: Int): Boolean = DROPPED_PORTS.contains(port)
 
+    /** True when the dotted-quad belongs to the loaded resolver set. */
+    fun containsAddress(address: String): Boolean = addresses.any { literal(address) == it }
+
     private fun literal(value: String): Int? = try {
         InetAddress.getByName(value).address.fold(0) { accumulator, byte ->
             (accumulator shl 8) or (byte.toInt() and 0xFF)

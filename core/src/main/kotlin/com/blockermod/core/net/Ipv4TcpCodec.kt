@@ -29,6 +29,7 @@ class Ipv4TcpPacket(
     val identification: Int,
     val ttl: Int,
     val tcpHeaderLength: Int,
+    val ipHeaderLength: Int = 20,
 )
 
 /**
@@ -99,6 +100,7 @@ object Ipv4TcpCodec {
             identification = readU16(packet, 4),
             ttl = packet[8].toInt() and 0xFF,
             tcpHeaderLength = tcpHeaderLength,
+            ipHeaderLength = ipHeaderLength,
         )
     }
 

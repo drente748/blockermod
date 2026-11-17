@@ -1,6 +1,10 @@
 package com.blockermod.platform.vpn
 
+import com.blockermod.core.dns.DnsTcpExchange
+import com.blockermod.core.dns.DnsTcpTransport
 import com.blockermod.core.dns.DnsTypes
+import com.blockermod.core.dns.frameDnsTcp
+import com.blockermod.core.dns.isDnsTruncated
 import java.io.IOException
 import java.net.DatagramPacket
 import java.net.DatagramSocket
@@ -117,16 +121,40 @@ internal class ReusableDnsSocket(
  */
 internal class UpstreamResolver(
     private val socketBinder: SocketBinder,
+    private val tcpProtect: (java.net.Socket) -> Boolean,
     private val upstreamServers: () -> List<InetAddress>,
     private val activeNetwork: () -> Any?,
     private val timeoutMillis: Int = TIMEOUT_MILLIS,
 ) : DnsUpstream, AutoCloseable {
 
     private val socket = ReusableDnsSocket(socketBinder)
+    private val tcpExchange = DnsTcpExchange()
 
     override fun lookup(host: String, type: Int): DnsWire.Answer {
-        val response = exchange(DnsWire.buildQuery(nextId(), host, type))
+        val query = DnsWire.buildQuery(nextId(), host, type)
+        var response = exchange(query)
             ?: return DnsWire.Answer(DnsWire.RCODE_SERVFAIL, emptyList())
+
+        // RFC 7766 §5 / RFC 9210 §3: a truncated UDP answer MUST be retried over TCP.
+        if (isDnsTruncated(response)) {
+            val network = activeNetwork()
+            val servers = upstreamServers()
+            for (server in servers) {
+                val transport = openTcpTransport(server, network) ?: continue
+                transport.use { candidate ->
+                    when (val outcome = tcpExchange.exchange(candidate, query)) {
+                        is DnsTcpExchange.Outcome.Message -> {
+                            response = outcome.bytes
+                            return@use
+                        }
+                        else -> {} // try the next server
+                    }
+                }
+                // A message with the matching ID was received; stop trying other servers.
+                if (!isDnsTruncated(response)) break
+            }
+            if (isDnsTruncated(response)) return DnsWire.Answer(DnsWire.RCODE_SERVFAIL, emptyList())
+        }
 
         val rcode = DnsWire.responseRcode(response)
         if (rcode != DnsWire.RCODE_NOERROR) {
@@ -136,6 +164,31 @@ internal class UpstreamResolver(
         val records = DnsWire.parseAnswers(response)
             .filter { it.type == type || it.type == DnsTypes.CNAME }
         return DnsWire.Answer(DnsWire.RCODE_NOERROR, records)
+    }
+
+    /** Opens a protected TCP socket for DNS retry; closed by the caller. */
+    private fun openTcpTransport(server: InetAddress, network: Any?): DnsTcpTransport? {
+        if (network == null) return null
+        var raw: java.net.Socket? = null
+        return try {
+            raw = java.net.Socket()
+            // protect() is called through the same binder used by relays: never let the retry
+            // socket re-enter the VPN.
+            if (!tcpProtect(raw)) throw IOException("socket could not be protected")
+            raw.soTimeout = TCP_TIMEOUT_MILLIS
+            raw.connect(InetSocketAddress(server, DNS_PORT), TCP_TIMEOUT_MILLIS)
+            raw.tcpNoDelay = true
+            val socket = raw
+            object : DnsTcpTransport {
+                override val input: java.io.InputStream = socket.getInputStream()
+                override val output: java.io.OutputStream = socket.getOutputStream()
+                override fun close() = socket.close()
+            }
+        } catch (exception: IOException) {
+            // A failed protect/connect still allocates an fd; never leak it.
+            try { raw?.close() } catch (ignored: Exception) {}
+            null
+        }
     }
 
     /** Sends a raw query to the upstream servers and returns the raw answer. */
@@ -155,6 +208,7 @@ internal class UpstreamResolver(
         const val DNS_PORT: Int = 53
         const val TIMEOUT_MILLIS: Int = 4000
         const val MAX_RESPONSE_SIZE: Int = 4096
+        const val TCP_TIMEOUT_MILLIS: Int = 3_000
         const val NEGATIVE_TTL_SECONDS: Long = 60L
         private val IDS = AtomicInteger(1)
     }

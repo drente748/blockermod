@@ -34,5 +34,11 @@ class SettingsActivity : Activity() {
         fullTunnel.setOnCheckedChangeListener { _, checked ->
             AppSettings.setFullTunnelEnabled(this, checked)
         }
+
+        val blockQuic = findViewById<Switch>(R.id.blockQuicSwitch)
+        blockQuic.isChecked = AppSettings.blockQuicEnabled(this)
+        blockQuic.setOnCheckedChangeListener { _, checked ->
+            AppSettings.setBlockQuicEnabled(this, checked)
+        }
     }
 }
