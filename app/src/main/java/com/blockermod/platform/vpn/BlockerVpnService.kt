@@ -30,7 +30,6 @@ import java.io.IOException
 import java.net.DatagramSocket
 import java.net.InetAddress
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.CopyOnWriteArrayList
 
 /**
  * The DNS only tunnel that enforces the blocking policy.
@@ -50,10 +49,13 @@ class BlockerVpnService : VpnService() {
     private var unsupportedHandle: AssetRules.BlocklistHandle? = null
     private var upstreamResolver: UpstreamResolver? = null
     private var fullTunnel: Boolean = false
+    @Volatile
     private var tunnelOutput: java.io.OutputStream? = null
-    private val tunnelOutputLock = Any()
 
-    private val upstreamServers = CopyOnWriteArrayList<InetAddress>()
+    // A snapshot reference swapped atomically: a lookup sees one complete server list, never a
+    // half-updated one (B9).
+    @Volatile
+    private var upstreamServers: List<InetAddress> = emptyList()
     private val networkCandidates = ConcurrentHashMap<String, NetworkCandidate>()
     private val networkObjects = ConcurrentHashMap<String, Network>()
     private val selector = NetworkSelector()
@@ -158,6 +160,7 @@ class BlockerVpnService : VpnService() {
             upstreamResolver?.close()
             upstreamResolver = null
             responder = null
+            tunnelOutput = null
 
             val message = exception.message ?: exception.javaClass.simpleName
             Log.e(TAG, "the tunnel could not be started", exception)
@@ -175,16 +178,8 @@ class BlockerVpnService : VpnService() {
     }
 
     override fun onDestroy() {
-        stopTunnel()
+        stopTunnel() // closes the descriptor, resolver and rule handles after the workers stop
         unregisterNetworkCallback()
-        upstreamResolver?.close()
-        upstreamResolver = null
-        blocklist?.close()
-        blocklist = null
-        bypassHandle?.close()
-        bypassHandle = null
-        unsupportedHandle?.close()
-        unsupportedHandle = null
         super.onDestroy()
     }
 
@@ -227,8 +222,9 @@ class BlockerVpnService : VpnService() {
 
     /** Writes a packet directly to the tunnel from a relay thread. */
     private fun writeTunnelPacket(packet: ByteArray) {
-        // VpnTunnel also synchronizes on this exact OutputStream for local DNS answers. Sharing the
-        // monitor prevents relay threads and tunnel workers from interleaving bytes of TUN frames.
+        // VpnTunnel synchronizes on this exact OutputStream for local DNS answers. That single
+        // monitor is the unified lock: relay threads and tunnel workers cannot interleave TUN
+        // frames, and the volatile read cannot use a stale stream after stopTunnel (B9).
         val output = tunnelOutput ?: return
         synchronized(output) {
             try {
@@ -250,21 +246,32 @@ class BlockerVpnService : VpnService() {
 
     private fun stopTunnel() {
         val running = tunnel ?: return
-        running.stop()
-        running.awaitStopped(STOP_TIMEOUT_MILLIS)
         tunnel = null
+        val descriptor = tunnelDescriptor
+        tunnelDescriptor = null
+        tunnelOutput = null
+        running.stop()
+
+        // Never block the main/callback thread on the worker join (ANR risk): a short-lived daemon
+        // thread waits on the tunnel's latch and releases every resource only after the workers are
+        // gone. No timer, sleep or polling — the wait is on a latch (B9).
+        Thread({
+            running.awaitStopped(STOP_TIMEOUT_MILLIS)
+            closeQuietly(descriptor)
+            upstreamResolver?.close()
+            upstreamResolver = null
+            blocklist?.close()
+            blocklist = null
+            bypassHandle?.close()
+            bypassHandle = null
+            unsupportedHandle?.close()
+            unsupportedHandle = null
+        }, "blockermod-stop").apply { isDaemon = true }.start()
+
         logRecordedDecisions()
         privateDnsActive = false
         EngineStatus.publishPrivateDns(false)
         EngineStatus.publish(BlockingState.Idle)
-
-        try {
-            tunnelDescriptor?.close()
-        } catch (exception: IOException) {
-            // the descriptor is already closed
-        }
-        tunnelDescriptor = null
-        synchronized(tunnelOutputLock) { tunnelOutput = null }
     }
 
     /**
@@ -284,7 +291,7 @@ class BlockerVpnService : VpnService() {
         val resolver = UpstreamResolver(
             socketBinder = { socket -> bindToPhysicalNetwork(socket) },
             tcpProtect = { socket -> protect(socket) },
-            upstreamServers = { upstreamServers.toList() },
+            upstreamServers = { upstreamServers },
             activeNetwork = { physicalNetwork },
         )
         upstreamResolver = resolver
@@ -467,20 +474,13 @@ class BlockerVpnService : VpnService() {
             responder?.clearCache()
         }
 
-        val servers = selected?.dnsServers?.mapNotNull { parseAddress(it) } ?: emptyList()
-        if (servers.toList() != upstreamServers.toList()) {
-            upstreamServers.clear()
-            upstreamServers.addAll(servers)
+        val servers = selected?.dnsServers?.mapNotNull { NumericAddresses.parse(it) } ?: emptyList()
+        if (servers != upstreamServers) {
+            upstreamServers = servers
             responder?.clearCache()
         }
         privateDnsActive = selected?.isPrivateDnsActive ?: false
         EngineStatus.publishPrivateDns(privateDnsActive)
-    }
-
-    private fun parseAddress(value: String): InetAddress? = try {
-        InetAddress.getByName(value)
-    } catch (exception: Exception) {
-        null
     }
 
     private fun unregisterNetworkCallback() {
@@ -492,7 +492,7 @@ class BlockerVpnService : VpnService() {
         networkObjects.clear()
         physicalNetwork = null
         selectedNetworkId = null
-        upstreamServers.clear()
+        upstreamServers = emptyList()
         responder?.clearCache()
     }
 
