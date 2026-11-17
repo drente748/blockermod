@@ -32,6 +32,20 @@ class BlocklistTest {
     }
 
     @Test
+    fun `the packed list keeps parents so they block every child`() {
+        // The pack step keeps the most comprehensive ancestor and drops covered children
+        // (tools/pack.py). Matching is subdomain-aware, so the apex entry must still block the
+        // www./m./de. variants that are no longer stored explicitly.
+        val matcher = matcher()
+
+        for (parent in PARENT_DOMAINS) {
+            assertTrue(matcher.matches(parent), "the parent $parent must be stored in the list")
+            assertTrue(matcher.matches("www.$parent"), "the parent must cover www.$parent")
+            assertTrue(matcher.matches("m.$parent"), "the parent must cover m.$parent")
+        }
+    }
+
+    @Test
     fun `the blocklist leaves unrelated domains alone`() {
         val matcher = matcher()
 
@@ -72,6 +86,12 @@ class BlocklistTest {
             "www.camsoda.com",
             "www.youporn.com",
             "www.xhamster.com",
+        )
+
+        val PARENT_DOMAINS = listOf(
+            "pornhub.com",
+            "xvideos.com",
+            "redtube.com",
         )
 
         val ALLOWED_DOMAINS = listOf(

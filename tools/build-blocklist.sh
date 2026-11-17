@@ -203,18 +203,23 @@ fi
 
 mkdir -p "${OUTPUT_DIR}"
 
-PACK_RESULT="$(python3 - "${OUTPUT_DIR}" "${ALLOWLIST}" "${SAFESEARCH_HOSTS}" "${#CACHED_FILES[@]}" "${CATEGORIES[@]}" "${CACHED_FILES[@]}" <<'PY'
+PACK_RESULT="$(python3 - "${SCRIPT_DIR}" "${OUTPUT_DIR}" "${ALLOWLIST}" "${SAFESEARCH_HOSTS}" "${#CACHED_FILES[@]}" "${CATEGORIES[@]}" "${CACHED_FILES[@]}" <<'PY'
 import ipaddress
 import json
 import os
 import sys
 
-output_dir = sys.argv[1]
-allowlist_path = sys.argv[2]
-safesearch_path = sys.argv[3]
-source_count = int(sys.argv[4])
-categories = sys.argv[5:5 + source_count]
-source_paths = sys.argv[5 + source_count:]
+script_dir = sys.argv[1]
+output_dir = sys.argv[2]
+allowlist_path = sys.argv[3]
+safesearch_path = sys.argv[4]
+source_count = int(sys.argv[5])
+categories = sys.argv[6:6 + source_count]
+source_paths = sys.argv[6 + source_count:]
+
+sys.path.insert(0, script_dir)
+from pack import pack
+
 
 
 def read_list(path):
@@ -287,27 +292,8 @@ def extract_domains(path):
     return domains
 
 
-def pack(domains):
-    """Drops child domains covered by a parent, packs reversed labels, returns (blob, count)."""
-    parents = set()
-    for domain in domains:
-        labels = domain.split(".")
-        for index in range(1, len(labels)):
-            parents.add(".".join(labels[index:]))
-    final = {domain for domain in domains if domain not in parents}
-
-    entries = []
-    for domain in final:
-        labels = reversed(domain.split("."))
-        entries.append("\u0000".join(labels).encode("ascii"))
-    entries.sort()
-
-    blob = bytearray()
-    for entry in entries:
-        blob += len(entry).to_bytes(2, "big")
-        blob += entry
-    return blob, len(entries)
-
+# pack() lives in tools/pack.py and is imported above, so the build script and the standalone
+# regression test share one implementation.
 
 protected = read_list(allowlist_path) | read_list(safesearch_path)
 

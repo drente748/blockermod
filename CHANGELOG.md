@@ -153,7 +153,7 @@
   hagezi NSFW + DoH/VPN/Proxy Bypass + NoSafeSearch (GPL-3.0 للبيانات — بقرار من المستخدم وتحديث
   `docs/LICENSE_DECISIONS.md`).
 - **`tools/build-blocklist.sh`** صار يدعم صيغة Adblock Plus وينتج ثلاث قوائم: `blocklist.bin`
-  (181,565 نطاق إباحي)، `bypass.bin` (16,458 نطاق DNS مشفّر/التفاف)، `unsupported.bin` (202 محرك
+  (154,897 نطاق إباحي)، `bypass.bin` (16,458 نطاق DNS مشفّر/التفاف)، `unsupported.bin` (202 محرك
   بلا SafeSearch)، مع `.meta` لكل قائمة.
 - **`AssetRules.openMatcher`** محمّل عام لأي قائمة معبّأة؛ `createPolicyEngine` يربط قوائم الالتفاف
   والمحركات غير المدعومة ويقع في الفشل المغلق عند غيابها.
