@@ -126,6 +126,15 @@ object DnsCodec {
     /** Query bit of the flags word. */
     private const val FLAG_QR: Int = 0x8000
 
+    /** Truncation bit of the response flags word (RFC 1035 4.1.1). */
+    private const val FLAG_TC: Int = 0x0200
+
+    /** Recursion available bit of the response flags word. */
+    private const val FLAG_RA: Int = 0x0080
+
+    /** Checking disabled bit of the flags word (echoed, RFC 6840 5.7). */
+    private const val FLAG_CD: Int = 0x0040
+
     /** Recursion desired bit of the flags word. */
     private const val FLAG_RD: Int = 0x0100
 
@@ -197,13 +206,32 @@ object DnsCodec {
 
     /**
      * Builds a successful response carrying the given answer records.
+     *
+     * When [udpPayloadSize] is set (the UDP path), a message larger than the limit is answered
+     * with TC=1 and no records (RFC 1035 4.1.1 / RFC 2181 9): the client retries over TCP. The
+     * TCP path passes null and never truncates.
      */
-    fun buildAnswer(query: DnsQuery, records: List<DnsRecord>): ByteArray =
-        buildResponse(query, RCODE_NOERROR, records)
+    fun buildAnswer(query: DnsQuery, records: List<DnsRecord>, udpPayloadSize: Int? = null): ByteArray =
+        buildResponse(query, RCODE_NOERROR, records, udpPayloadSize)
 
-    private fun buildResponse(query: DnsQuery, rcode: Int, answers: List<DnsRecord>): ByteArray {
+    private fun buildResponse(
+        query: DnsQuery,
+        rcode: Int,
+        answers: List<DnsRecord>,
+        udpPayloadSize: Int? = null,
+    ): ByteArray {
+        val message = buildMessage(query, rcode, answers, truncated = false)
+        if (udpPayloadSize != null && message.size > udpPayloadSize) {
+            return buildMessage(query, RCODE_NOERROR, emptyList(), truncated = true)
+        }
+        return message
+    }
+
+    private fun buildMessage(query: DnsQuery, rcode: Int, answers: List<DnsRecord>, truncated: Boolean): ByteArray {
         val out = ByteArrayOutputStream()
-        val flags = FLAG_QR or (query.flags and FLAG_RD) or (rcode and 0x0F)
+        val flags = FLAG_QR or FLAG_RA or (query.flags and FLAG_CD) or
+            (query.flags and FLAG_RD) or (rcode and 0x0F) or
+            (if (truncated) FLAG_TC else 0)
 
         writeU16(out, query.id)
         writeU16(out, flags)

@@ -26,10 +26,14 @@ internal class LocalDnsResolver(
     private val bypassPolicy: Boolean = false,
 ) {
 
-    /** Resolves a raw DNS wire query; null means the payload was not a query and must be dropped. */
-    fun resolve(payload: ByteArray): ByteArray? {
+    /** Resolves a raw DNS wire query; null means the payload was not a query and must be dropped.
+     *
+     * [udpPayloadSize] is the UDP path's client buffer (RFC 6891): answers larger than it are
+     * truncated (TC=1) so the client retries over TCP. The TCP path leaves it null.
+     */
+    fun resolve(payload: ByteArray, udpPayloadSize: Int? = null): ByteArray? {
         val query = DnsCodec.parseQuery(payload) ?: return null
-        return resolveQuery(query)
+        return resolveQuery(query, udpPayloadSize)
     }
 
     /** Resolves a DNS-over-TCP message (two-byte length prefix) and returns a framed response. */
@@ -47,17 +51,17 @@ internal class LocalDnsResolver(
     /** Clears the resolver cache; called when the upstream network changes. */
     fun clearCache() = cache.clear()
 
-    private fun resolveQuery(query: DnsQuery): ByteArray = when (val decision = if (bypassPolicy) BlockingResult.Allowed else policy.evaluate(query.question.name)) {
+    private fun resolveQuery(query: DnsQuery, udpPayloadSize: Int?): ByteArray = when (val decision = if (bypassPolicy) BlockingResult.Allowed else policy.evaluate(query.question.name)) {
         is BlockingResult.Blocked -> {
             onBlocked(decision.reason)
             DnsCodec.buildNxDomain(query)
         }
-        is BlockingResult.Rewrite -> rewrite(query, decision.cnameTarget)
+        is BlockingResult.Rewrite -> rewrite(query, decision.cnameTarget, udpPayloadSize)
         is BlockingResult.Error -> DnsCodec.buildServFail(query)
-        is BlockingResult.Allowed -> resolveAllowed(query)
+        is BlockingResult.Allowed -> resolveAllowed(query, udpPayloadSize)
     }
 
-    private fun resolveAllowed(query: DnsQuery): ByteArray {
+    private fun resolveAllowed(query: DnsQuery, udpPayloadSize: Int?): ByteArray {
         val answer = resolveRecords(query.question.name, query.question.type, depth = 0)
         return when (answer.rcode) {
             DnsWire.RCODE_NXDOMAIN -> DnsCodec.buildNxDomain(query)
@@ -71,7 +75,7 @@ internal class LocalDnsResolver(
                     // names are allowed to point at private addresses by definition.
                     DnsCodec.buildServFail(query)
                 } else {
-                    DnsCodec.buildAnswer(query, answer.records)
+                    DnsCodec.buildAnswer(query, answer.records, udpPayloadSize)
                 }
             }
             else -> DnsCodec.buildServFail(query)
@@ -113,7 +117,7 @@ internal class LocalDnsResolver(
     }
 
     /** SafeSearch: resolve the canonical target and return CNAME plus A/AAAA records. */
-    private fun rewrite(query: DnsQuery, target: String): ByteArray {
+    private fun rewrite(query: DnsQuery, target: String, udpPayloadSize: Int?): ByteArray {
         if (query.question.type == DnsTypes.HTTPS || query.question.type == TYPE_SVCB) {
             return DnsCodec.buildNoData(query)
         }
@@ -130,7 +134,7 @@ internal class LocalDnsResolver(
         val answers = ArrayList<DnsRecord>(records.size + 1)
         answers.add(DnsRecord(query.question.name, DnsTypes.CNAME, CLASS_IN, ttl, DnsWire.encodeName(target)))
         answers.addAll(records)
-        return DnsCodec.buildAnswer(query, answers)
+        return DnsCodec.buildAnswer(query, answers, udpPayloadSize)
     }
 
     private fun hasBlockedCname(records: List<DnsRecord>): Boolean {

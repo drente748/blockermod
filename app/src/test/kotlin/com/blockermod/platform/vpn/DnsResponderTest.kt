@@ -157,6 +157,26 @@ class DnsResponderTest {
         assertTrue(upstream.requestedHosts.contains("adult.example"))
     }
 
+    @Test
+    fun `a large udp answer is truncated while the tcp path is not`() {
+        val upstream = FakeUpstream(
+            mapOf("big.example/1" to listOf(DnsRecord("big.example", DnsTypes.TXT, 1, 60, ByteArray(2000)))),
+        )
+        val responder = responder(upstream = upstream)
+
+        // UDP path (query advertises 1232 like DnsWire.buildQuery does): truncated.
+        val udp = responder.respond(DnsWire.buildQuery(0x6101, "big.example", DnsTypes.A))
+        assertNotNull(udp)
+        assertEquals(0x0200, readU16(udp, 2) and 0x0200)
+        assertEquals(0, readU16(udp, 6))
+
+        // TCP path (resolveDnsMessage): never truncated.
+        val tcp = responder.resolveDnsMessage(DnsWire.buildQuery(0x6102, "big.example", DnsTypes.A))
+        assertNotNull(tcp)
+        assertEquals(0, readU16(tcp, 2) and 0x0200)
+        assertEquals(1, readU16(tcp, 6))
+    }
+
     private fun responder(
         adultBlocklist: Set<String> = emptySet(),
         safeSearchTable: com.blockermod.core.policy.SafeSearchTable = InMemorySafeSearchTable(emptyMap()),

@@ -27,7 +27,10 @@ internal class DnsResponder(
     /** Answers a raw UDP DNS payload, or null when the payload is not a query. */
     fun respond(payload: ByteArray): ByteArray? {
         val query = DnsCodec.parseQuery(payload) ?: return null
-        val response = resolver.resolve(payload)
+        // RFC 6891 6.2.3: an advertised payload below 512 is treated as 512. Answers larger than
+        // the limit go out with TC=1 and the client retries over TCP (B2).
+        val udpPayloadSize = query.edns?.payloadSize?.coerceIn(MIN_CLIENT_PAYLOAD, 65535) ?: MIN_CLIENT_PAYLOAD
+        val response = resolver.resolve(payload, udpPayloadSize)
         if (logOnly) decisions.record(com.blockermod.core.BlockingResult.Allowed)
         return response
     }
@@ -40,4 +43,9 @@ internal class DnsResponder(
 
     /** Drops cached answers; called when the upstream network changes. */
     fun clearCache() = resolver.clearCache()
+
+    private companion object {
+        /** RFC 6891 6.2.3: payloads below 512 bytes are treated as 512. */
+        const val MIN_CLIENT_PAYLOAD: Int = 512
+    }
 }

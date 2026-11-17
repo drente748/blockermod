@@ -226,6 +226,56 @@ class DnsCodecTest {
     }
 
     @Test
+    fun `responses advertise recursion available`() {
+        val query = DnsCodec.parseQuery(buildQuery())!!
+        val response = DnsCodec.buildNxDomain(query)
+
+        assertEquals(0x0080, readU16(response, 2) and 0x0080)
+    }
+
+    @Test
+    fun `the checking disabled bit is echoed`() {
+        val query = DnsCodec.parseQuery(buildQuery(flags = 0x0140))!! // RD | CD
+        val response = DnsCodec.buildNoData(query)
+
+        assertEquals(0x0040, readU16(response, 2) and 0x0040)
+    }
+
+    @Test
+    fun `an answer too large for udp is truncated`() {
+        val query = DnsCodec.parseQuery(buildQuery(withEdns = true))!! // 1232-byte payload
+        val record = DnsRecord("example.com", DnsTypes.TXT, 1, 60, ByteArray(2000))
+
+        val response = DnsCodec.buildAnswer(query, listOf(record), udpPayloadSize = 1232)
+
+        assertEquals(0x0200, readU16(response, 2) and 0x0200)
+        assertEquals(0, readU16(response, 6))
+        assertEquals(0, readU16(response, 2) and 0x0F)
+    }
+
+    @Test
+    fun `an answer within the payload size is not truncated`() {
+        val query = DnsCodec.parseQuery(buildQuery(withEdns = true))!!
+        val record = DnsRecord("example.com", DnsTypes.TXT, 1, 60, ByteArray(100))
+
+        val response = DnsCodec.buildAnswer(query, listOf(record), udpPayloadSize = 1232)
+
+        assertEquals(0, readU16(response, 2) and 0x0200)
+        assertEquals(1, readU16(response, 6))
+    }
+
+    @Test
+    fun `the tcp path never truncates`() {
+        val query = DnsCodec.parseQuery(buildQuery(withEdns = true))!!
+        val record = DnsRecord("example.com", DnsTypes.TXT, 1, 60, ByteArray(2000))
+
+        val response = DnsCodec.buildAnswer(query, listOf(record))
+
+        assertEquals(0, readU16(response, 2) and 0x0200)
+        assertEquals(1, readU16(response, 6))
+    }
+
+    @Test
     fun `never throws on random input`() {
         val random = java.util.Random(7)
 
