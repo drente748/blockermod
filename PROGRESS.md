@@ -8,7 +8,7 @@
 |---|---|
 | المرحلة | 2 — إصلاح جذري مختبر للمحرك (A1–A3 مكتملة، B/C قيد التنفيذ) |
 | الوحدات | `:core` (Kotlin/JVM خالص) و`:app` (أندرويد)، `:app → :core` فقط |
-| الاختبارات | **244 اختبارًا** (158 في `:core` + 86 في `:app`) — انظر قسم التحقق |
+| الاختبارات | **273 اختبارًا** (168 في `:core` + 105 في `:app`) — انظر قسم التحقق |
 | Lint | يُتحقَّق منه في قسم التحقق أدناه |
 | القوائم | 154,844 نطاق إباحي + 16,458 نطاق التفاف/DNS مشفّر + 202 محرك بلا SafeSearch، من 6 مصادر مثبّتة |
 | وضع التشغيل | DNS-only (افتراضي، معتمد) + Full Tunnel (تجريبي، اختياري) |
@@ -27,8 +27,18 @@
 | A2 | إبقاء الآباء وإسقاط الأبناء المشمولين فقط في البناء | `BlocklistTest` (نطاقات حقيقية) + `tools/test-pack.py` | ✅ |
 | A3 | حظر DoT على TCP/853 في Full Tunnel عبر `TransportPolicy` | اختبارات TCP-853/443 التكاملية | ✅ |
 | B1 | أسماء local-use لا تُحظر ولا تُعبّأ ولا تُرفض في rebinding | `PolicyEngineTest` (اختباران) + `tools/test-pack.py` | ✅ |
+| B2 | RA/CD وTCP مُجزّأ عند تجاوز حزمة UDP | `DnsCodecTest` + `DnsResponderTest` | ✅ |
+| B3 | رسائل DNS-over-TCP حتى 65535 وسعة فريم كافية | `DnsTcpExchangeTest` + `DnsTcpFramerTest` | ✅ |
+| B4 | بيانات على ACK الثالث، LAST-ACK وإغلاق ذري | `DnsTcpEndpointTest` (وُسّع اختبار FIN) | ✅ |
+| B5 | نافذة الاستقبال تُقيّد حقن بيانات الخادم | `TcpRelayTest` | ✅ |
+| B6 | رفض MF وRST وفق RFC 5961 | `Ipv4TcpCodecTest` + `Ipv4UdpCodecTest` | ✅ |
+| B7 | معرّفات عشوائية، تجمع مقابس، مهلة إجمالية | `UpstreamResolverHardeningTest` | ✅ |
+| B8 | bailiwick، rewrite حسب النوع، نطاقات محجوزة، حد السجلات | `LocalDnsResolverTest` + `DnsResponderTest` + `DnsWireHardeningTest` | ✅ |
+| B9 | تبديل ذري، إيقاف خلفي، عناوين رقمية فقط | `NumericAddressesTest` | ✅ |
+| B10 | 26 عنوان DNS مشفّر | `StrictResolversAssetTest` | ✅ |
+| B11 | CI محاكي + إصدار موقّع + تراخيص + onboarding + نسخ المفتاح | `ReleaseInfrastructureTest` | ✅ |
 
-البقية (B2→B10، C1→C10) تعمل بعد إتمام B1.
+البقية (C1→C10) تبدأ بعد B11.
 
 ## هذه الجولة — إكمال DNS-over-TCP (طلب مخصّص)
 
@@ -156,8 +166,8 @@
 
 | # | الأمر | النتيجة |
 |---|---|---|
-| 1 | `./gradlew :core:test` | **PASS** — 158 اختبارًا، 0 فشل |
-| 2 | `./gradlew :app:testDebugUnitTest` | **PASS** — 86 اختبارًا، 0 فشل |
+| 1 | `./gradlew :core:test` | **PASS** — 168 اختبارًا، 0 فشل |
+| 2 | `./gradlew :app:testDebugUnitTest` | **PASS** — 105 اختبارًا، 0 فشل |
 | 3 | `./gradlew :app:lintDebug` | **PASS** — لا مشاكل (0 بعد نقل اعتماديات androidTest للـ catalog) |
 | 4 | `./gradlew :app:assembleDebug` | **PASS** — `app-debug.apk` |
 | 5 | `./gradlew :app:assembleRelease` | **PASS** — `app-release.apk` موقّع v2 |
