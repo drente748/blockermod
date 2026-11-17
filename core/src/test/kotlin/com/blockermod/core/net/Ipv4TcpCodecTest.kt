@@ -74,10 +74,40 @@ class Ipv4TcpCodecTest {
         assertNull(Ipv4TcpCodec.parse(packet.copyOf(30)))
     }
 
+    @Test
+    fun `rejects a first fragment with the more fragments bit set`() {
+        val packet = buildTcp(flags = Ipv4TcpCodec.Flags.SYN, moreFragments = true)
+
+        assertNull(Ipv4TcpCodec.parse(packet))
+    }
+
+    @Test
+    fun `reset follows the RFC 5961 sequence numbers`() {
+        // A reset answering an ACK takes SEQ from the incoming ACK and ACK from SEG.SEQ+SEG.LEN.
+        val withAck = Ipv4TcpCodec.parse(buildTcp(
+            flags = Ipv4TcpCodec.Flags.SYN or Ipv4TcpCodec.Flags.ACK,
+            ack = 500L,
+            payload = byteArrayOf(1, 2, 3),
+        ))!!
+        val reset = Ipv4TcpCodec.parse(Ipv4TcpCodec.reset(withAck))!!
+
+        assertEquals(500L, reset.sequenceNumber)
+        assertEquals(104L, reset.acknowledgmentNumber) // 100 + SYN + 3 bytes
+        assertEquals(Ipv4TcpCodec.Flags.RST or Ipv4TcpCodec.Flags.ACK, reset.flags)
+
+        // A pure SYN has no ACK field: SEQ = ACK = SEG.SEQ + 1.
+        val syn = Ipv4TcpCodec.parse(buildTcp(flags = Ipv4TcpCodec.Flags.SYN))!!
+        val resetSyn = Ipv4TcpCodec.parse(Ipv4TcpCodec.reset(syn))!!
+        assertEquals(101L, resetSyn.sequenceNumber)
+        assertEquals(101L, resetSyn.acknowledgmentNumber)
+    }
+
     private fun buildTcp(
         flags: Int,
         payload: ByteArray = EMPTY,
         options: ByteArray = EMPTY,
+        ack: Long = 0L,
+        moreFragments: Boolean = false,
     ): ByteArray {
         val tcpHeader = 20 + options.size
         val tcpLength = tcpHeader + payload.size
@@ -87,7 +117,7 @@ class Ipv4TcpCodecTest {
         p[0] = 0x45
         writeU16(p, 2, total)
         writeU16(p, 4, 0x1234)
-        writeU16(p, 6, 0x4000)
+        writeU16(p, 6, if (moreFragments) 0x6000 else 0x4000) // DF, or DF|MF
         p[8] = 64
         p[9] = 6
         writeU32(p, 12, 0x0A000001)
@@ -98,7 +128,7 @@ class Ipv4TcpCodecTest {
         writeU16(p, t, 40_000)
         writeU16(p, t + 2, 443)
         writeU32(p, t + 4, 100L)
-        writeU32(p, t + 8, 0L)
+        writeU32(p, t + 8, ack)
         p[t + 12] = ((tcpHeader / 4) shl 4).toByte()
         p[t + 13] = (flags and 0x3F).toByte()
         writeU16(p, t + 14, 64_000)

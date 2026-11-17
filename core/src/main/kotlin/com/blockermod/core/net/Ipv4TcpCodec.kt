@@ -71,8 +71,9 @@ object Ipv4TcpCodec {
         val totalLength = readU16(packet, 2)
         if (totalLength < ipHeaderLength + MIN_TCP_HEADER_SIZE || totalLength > packet.size) return null
 
-        val fragmentOffset = readU16(packet, 6) and 0x1FFF
-        if (fragmentOffset != 0) return null
+        // MF (0x2000) or a non-zero offset: a fragment cannot be parsed or policy-checked safely,
+        // and this tunnel does no reassembly. Reject the first fragment too (B6).
+        if (readU16(packet, 6) and 0x3FFF != 0) return null
         if (packet[9].toInt() and 0xFF != PROTOCOL_TCP) return null
         if (Ipv4UdpCodec.ipv4HeaderChecksum(packet, ipHeaderLength) != 0) return null
 
@@ -190,14 +191,27 @@ object Ipv4TcpCodec {
 
     const val MAX_MSS: Int = 1460
 
-    /** A RST packet closing the connection in the given direction. */
-    fun reset(request: Ipv4TcpPacket): ByteArray = build(
-        request = request,
-        payload = EMPTY,
-        sequenceNumber = 0L,
-        acknowledgmentNumber = request.sequenceNumber + 1L,
-        flags = Flags.RST or Flags.ACK,
-    )
+    /**
+     * RFC 5961 §3.2 reset: SEQ comes from the incoming ACK when present, otherwise from
+     * SEG.SEQ+SEG.LEN; ACK is always SEG.SEQ+SEG.LEN (SYN and FIN each consume one sequence number).
+     */
+    fun reset(request: Ipv4TcpPacket): ByteArray {
+        val consumed = request.payload.size +
+            (if (request.flags and (Flags.SYN or Flags.FIN) != 0) 1 else 0)
+        val ackNumber = (request.sequenceNumber + consumed.toLong()) and 0xFFFFFFFFL
+        val sequenceNumber = if (request.flags and Flags.ACK != 0) {
+            request.acknowledgmentNumber
+        } else {
+            ackNumber
+        }
+        return build(
+            request = request,
+            payload = EMPTY,
+            sequenceNumber = sequenceNumber,
+            acknowledgmentNumber = ackNumber,
+            flags = Flags.RST or Flags.ACK,
+        )
+    }
 
     private fun computeTcpChecksum(
         sourceAddress: Int,

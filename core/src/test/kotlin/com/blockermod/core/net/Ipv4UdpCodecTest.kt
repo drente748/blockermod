@@ -58,6 +58,11 @@ class Ipv4UdpCodecTest {
     }
 
     @Test
+    fun `rejects a first fragment with the more fragments bit set`() {
+        assertNull(Ipv4UdpCodec.parseIpv4Udp(buildPacket(fragmentOffset = 0x2000)))
+    }
+
+    @Test
     fun `rejects a packet whose total length exceeds the buffer`() {
         val packet = buildPacket()
         writeU16(packet, 2, packet.size + 40)

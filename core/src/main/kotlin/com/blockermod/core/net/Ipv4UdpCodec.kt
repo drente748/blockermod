@@ -63,8 +63,9 @@ object Ipv4UdpCodec {
         if (totalLength < headerLength + UDP_HEADER_SIZE) return null
         if (totalLength > packet.size) return null
 
-        val fragmentOffset = readU16(packet, 6) and 0x1FFF
-        if (fragmentOffset != 0) return null
+        // MF (0x2000) or a non-zero offset: DNS policy must see a whole datagram, never a fragment
+        // (this tunnel does no reassembly) — reject even the first fragment (B6).
+        if (readU16(packet, 6) and 0x3FFF != 0) return null
 
         if (packet[9].toInt() != PROTOCOL_UDP) return null
         if (ipv4HeaderChecksum(packet, headerLength) != 0) return null
