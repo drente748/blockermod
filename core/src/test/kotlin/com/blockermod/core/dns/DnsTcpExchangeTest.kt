@@ -127,4 +127,24 @@ class DnsTcpExchangeTest {
         assertEquals(DnsTcpExchange.Outcome.Closed, outcome)
         assertTrue(reads < 64, "the absolute deadline must stop the loop before MAX_READS (reads=$reads)")
     }
+
+    @Test
+    fun `a maximal 65535 byte response is accepted`() {
+        // TCP is the fallback for truncated UDP answers, so a legal 64 KiB message must not be
+        // rejected as oversized by the old 4 KiB default (B3).
+        val query = ByteArray(12) { it.toByte() } // id = 0x0001
+        val response = ByteArray(DnsTcpFramer.MAX_MESSAGE)
+        response[0] = query[0]
+        response[1] = query[1]
+        response[2] = 0x80.toByte() // QR bit: an answer
+        val transport = object : DnsTcpTransport {
+            override val input = ByteArrayInputStream(frameDnsTcp(response))
+            override val output = ByteArrayOutputStream()
+            override fun close() = Unit
+        }
+
+        val result = DnsTcpExchange().exchange(transport, query) as DnsTcpExchange.Outcome.Message
+
+        assertEquals(response.toList(), result.bytes.toList())
+    }
 }

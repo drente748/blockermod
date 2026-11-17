@@ -27,7 +27,9 @@ interface DnsTcpTransport : AutoCloseable {
  * different question on a reused connection.
  */
 class DnsTcpExchange(
-    private val maxMessageSize: Int = DnsTcpFramer.DEFAULT_MAX_MESSAGE,
+    // The RFC 7766 maximum: TCP is the fallback for truncated answers, so the response can be as
+    // large as the 16-bit length prefix allows; the old 4 KiB default rejected legal big answers (B3).
+    private val maxMessageSize: Int = DnsTcpFramer.MAX_MESSAGE,
     private val readTimeoutMillis: Int = DEFAULT_READ_TIMEOUT_MILLIS,
     private val nowNanos: () -> Long = { System.nanoTime() },
 ) {

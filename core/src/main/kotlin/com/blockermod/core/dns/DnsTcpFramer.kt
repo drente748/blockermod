@@ -20,7 +20,9 @@ class DnsTcpFramer(
      */
     fun feed(bytes: ByteArray): List<ByteArray> {
         if (bytes.isEmpty()) return EMPTY_LIST
-        if (buffer.size + bytes.size > maxBufferedBytes) {
+        // A maximal legal message needs maxMessageSize + 2 buffered bytes, so the cap must never be
+        // smaller than that or a full-size response would be rejected as malformed (B3).
+        if (buffer.size + bytes.size > maxOf(maxBufferedBytes, maxMessageSize + 2)) {
             error = true
             buffer = EMPTY
             return EMPTY_LIST
@@ -58,6 +60,9 @@ class DnsTcpFramer(
     companion object {
         /** DNS over TCP messages must fit in 16 bits; 4 KiB covers ordinary resolver answers. */
         const val DEFAULT_MAX_MESSAGE: Int = 4096
+
+        /** The RFC 7766 maximum: a DNS-over-TCP message is bounded by the 16-bit length prefix. */
+        const val MAX_MESSAGE: Int = 0xFFFF
         const val DEFAULT_MAX_BUFFERED: Int = 64 * 1024
         private const val MIN_DNS_MESSAGE: Int = 12
         val EMPTY = ByteArray(0)

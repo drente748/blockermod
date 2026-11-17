@@ -63,6 +63,20 @@ class DnsTcpFramerTest {
     }
 
     @Test
+    fun `a maximal message fits the default buffer when the size limit allows it`() {
+        // Default maxBufferedBytes (64 KiB) is one byte short of a maximal framed message; the
+        // buffer cap must scale to maxMessageSize + 2 (B3).
+        val framer = DnsTcpFramer(maxMessageSize = DnsTcpFramer.MAX_MESSAGE)
+        val framed = frameDnsTcp(ByteArray(DnsTcpFramer.MAX_MESSAGE))
+
+        val emitted = framer.feed(framed)
+
+        assertEquals(1, emitted.size)
+        assertEquals(DnsTcpFramer.MAX_MESSAGE, emitted[0].size)
+        assertFalse(framer.error)
+    }
+
+    @Test
     fun `reset clears partial state`() {
         val framer = DnsTcpFramer()
         framer.feed(byteArrayOf(0, 20, 1))
