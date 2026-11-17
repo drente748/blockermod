@@ -11,6 +11,7 @@ captures/
 *.apk
 *.aab
 tools/cache/
+tools/__pycache__/
 *.keystore
 *.jks
 keystore.properties
