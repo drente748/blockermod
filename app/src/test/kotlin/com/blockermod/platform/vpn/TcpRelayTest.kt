@@ -3,6 +3,7 @@ package com.blockermod.platform.vpn
 import com.blockermod.core.DomainMatcher
 import com.blockermod.core.net.Ipv4TcpCodec
 import com.blockermod.core.net.Ipv4TcpPacket
+import com.blockermod.core.policy.TransportPolicy
 import java.io.ByteArrayOutputStream
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -21,10 +22,15 @@ class TcpRelayTest {
         override fun matches(domain: String) = false
     }
 
+    private fun policy(blocker: DomainMatcher = noDomains) = TransportPolicy(
+        isKnownEncryptedResolver = { false },
+        dohHosts = blocker,
+    )
+
     private fun relay(now: () -> Long = { 0L }) = TcpRelay(
         protectSocket = { true },
         writePacket = { written.write(it) },
-        dohHosts = noDomains,
+        transportPolicy = policy(),
         onDohBlocked = { blocked++ },
         nowMillis = now,
     )
@@ -120,7 +126,7 @@ class TcpRelayTest {
         val relay = TcpRelay(
             protectSocket = { true },
             writePacket = { written2.write(it) },
-            dohHosts = doh,
+            transportPolicy = policy(doh),
             onDohBlocked = { blocked++ },
             nowMillis = { 0L },
         )
@@ -135,6 +141,17 @@ class TcpRelayTest {
 
         assertEquals(1, blocked, "the assembled ClientHello must be recognized as DoH")
         assertEquals(0, relay.connectionCount())
+    }
+
+    @Test
+    fun `dot on tcp 853 is reset through the transport policy`() {
+        val relay = relay()
+        relay.handle(seg(seq = 100L, port = 853, flags = Ipv4TcpCodec.Flags.SYN))
+
+        assertEquals(0, relay.connectionCount(), "no connection may stay open to port 853")
+        val reply = packets().single()
+        assertEquals(Ipv4TcpCodec.Flags.RST or Ipv4TcpCodec.Flags.ACK, reply.flags and 0x3F)
+        assertEquals(1, blocked, "the reset counts as a blocked bypass attempt")
     }
 
     /** Minimal structurally-valid ClientHello carrying one SNI extension. */

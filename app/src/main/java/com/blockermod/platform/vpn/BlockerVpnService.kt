@@ -104,11 +104,16 @@ class BlockerVpnService : VpnService() {
             val created = createResponder()
             responder = created
 
+            val transportPolicy = TransportPolicy(
+                isKnownEncryptedResolver = { ip -> StrictResolverIps.containsAddress(ip) },
+                dohHosts = created.bypassMatcher(),
+                blockAllQuic = AppSettings.blockQuicEnabled(this),
+            )
             val tcpRelay = if (fullTunnel) {
                 TcpRelay(
                     protectSocket = { protect(it) },
                     writePacket = { packet -> writeTunnelPacket(packet) },
-                    dohHosts = created.bypassMatcher(),
+                    transportPolicy = transportPolicy,
                     onDohBlocked = { EngineStatus.recordBlocked() },
                 )
             } else null
@@ -124,11 +129,6 @@ class BlockerVpnService : VpnService() {
             val dnsTcpEndpoint = DnsTcpEndpoint(
                 writePacket = { packet -> writeTunnelPacket(packet) },
                 resolve = { message -> created.resolveDnsMessage(message) },
-            )
-            val transportPolicy = TransportPolicy(
-                isKnownEncryptedResolver = { ip -> StrictResolverIps.containsAddress(ip) },
-                dohHosts = created.bypassMatcher(),
-                blockAllQuic = AppSettings.blockQuicEnabled(this),
             )
             val started = VpnTunnel(
                 input = FileInputStream(descriptor.fileDescriptor),

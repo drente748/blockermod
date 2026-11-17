@@ -327,6 +327,15 @@ internal class VpnTunnel(
             writePacketAsync(Ipv4TcpCodec.reset(tcp))
             return
         }
+        // DoT over TCP/853 is encrypted DNS by definition (RFC 7858): blocked for every
+        // destination through the same transport policy that governs DoQ, never relayed (A3).
+        if (tcp.destinationPort == DOQ_PORT) {
+            val action = transportPolicy?.decide(PacketTransport.TCP_DOT_853, tcp.destinationAddress.ipv4String())
+            if (action == TransportAction.BLOCK_ENCRYPTED_DNS) {
+                writePacketAsync(Ipv4TcpCodec.reset(tcp))
+            }
+            return
+        }
         // DNS-over-TCP uses the same stream endpoint as DNS-only mode, not the generic TCP relay.
         if (tcp.destinationPort == DNS_PORT) {
             dnsTcpEndpoint?.handle(tcp)

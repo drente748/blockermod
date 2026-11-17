@@ -1,9 +1,9 @@
 package com.blockermod.platform.vpn
 
-import com.blockermod.core.DomainMatcher
 import com.blockermod.core.net.Ipv4TcpCodec
 import com.blockermod.core.net.Ipv4TcpPacket
 import com.blockermod.core.net.TcpStreamBuffer
+import com.blockermod.core.policy.TransportPolicy
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Socket
@@ -23,7 +23,7 @@ import kotlin.random.Random
 internal class TcpRelay(
     private val protectSocket: (Socket) -> Boolean,
     private val writePacket: (ByteArray) -> Unit,
-    private val dohHosts: DomainMatcher,
+    private val transportPolicy: TransportPolicy,
     private val onDohBlocked: () -> Unit,
     private val connectTimeoutMillis: Int = 5_000,
     private val idleTimeoutMillis: Long = 60_000L,
@@ -67,6 +67,20 @@ internal class TcpRelay(
         val ack = packet.flags and Ipv4TcpCodec.Flags.ACK != 0
         val rst = packet.flags and Ipv4TcpCodec.Flags.RST != 0
         val fin = packet.flags and Ipv4TcpCodec.Flags.FIN != 0
+
+        // Defensive port-853 gate (A3): DoT is encrypted DNS for every destination. VpnTunnel
+        // decides first; this check keeps the relay safe if it is ever reused directly.
+        if (packet.destinationPort == DOT_PORT) {
+            val action = transportPolicy.decide(
+                com.blockermod.core.policy.PacketTransport.TCP_DOT_853,
+                key.destinationAddress.ipv4String(),
+            )
+            if (action == com.blockermod.core.policy.TransportAction.BLOCK_ENCRYPTED_DNS) {
+                onDohBlocked()
+                writePacket(Ipv4TcpCodec.reset(packet))
+                return
+            }
+        }
 
         // Reap BEFORE taking any connection lock. reapIdle() locks other flows via close(); calling
         // it while holding one flow's lock would allow two workers to deadlock (A holds lock A and
@@ -158,7 +172,7 @@ internal class TcpRelay(
         }
     }
 
-    /** Applies DoH policy to the reassembled client stream, not to a single TCP segment. */
+    /** Applies the encrypted-DNS transport policy to the reassembled client stream (A3). */
     private fun inspectClientData(connection: Connection, packet: Ipv4TcpPacket, bytes: ByteArray) {
         if (packet.destinationPort == 443 && !connection.policyDecided) {
             val result = TlsSniInspector.inspect(bytes)
@@ -169,17 +183,22 @@ internal class TcpRelay(
                     // Malformed TLS on 443 is not necessarily DoH; let it through but stop inspecting.
                     connection.policyDecided = true
                 }
-                TlsInspection.SNI -> {
+                TlsInspection.SNI, TlsInspection.ECH -> {
+                    // The transport policy is the single decision point for TCP/443: it blocks a
+                    // known DoH SNI and allows ECH (documented blind spot). The relay no longer
+                    // applies a parallel matcher of its own.
+                    val action = transportPolicy.decide(
+                        com.blockermod.core.policy.PacketTransport.TCP_DOH_443,
+                        connection.key.destinationAddress.ipv4String(),
+                        serverName = result.serverName,
+                        echDetected = result.kind == TlsInspection.ECH,
+                    )
                     connection.policyDecided = true
-                    if (result.serverName != null && dohHosts.matches(result.serverName!!)) {
+                    if (action == com.blockermod.core.policy.TransportAction.BLOCK_ENCRYPTED_DNS) {
                         onDohBlocked()
                         writePacket(Ipv4TcpCodec.reset(packet))
                         close(connection)
                     }
-                }
-                TlsInspection.ECH -> {
-                    // ECH hides the real name. Do not block all TLS: document the blind spot.
-                    connection.policyDecided = true
                 }
                 TlsInspection.UNKNOWN -> {
                     // Need more bytes to decide; keep the socket closed until the decision exists.
@@ -334,8 +353,13 @@ internal class TcpRelay(
         const val MSS: Int = 1460
         const val SEGMENT_SIZE: Int = 1460
         const val MAX_TLS_PREFILTER: Int = 16 * 1024
+        const val DOT_PORT: Int = 853
         val EMPTY = ByteArray(0)
 
         fun nextIsn(): Long = (System.currentTimeMillis() ushr 1) xor Random.nextLong(1L, Int.MAX_VALUE.toLong())
     }
 }
+
+/** Formats a raw IPv4 address (network byte order int) as a dotted quad. */
+internal fun Int.ipv4String(): String =
+    "${(this ushr 24) and 0xFF}.${(this ushr 16) and 0xFF}.${(this ushr 8) and 0xFF}.${this and 0xFF}"

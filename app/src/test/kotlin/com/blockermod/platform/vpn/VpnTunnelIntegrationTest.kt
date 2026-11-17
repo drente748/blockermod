@@ -9,6 +9,7 @@ import com.blockermod.core.net.Ipv4UdpPacket
 import com.blockermod.core.policy.TransportPolicy
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 /**
  * End-to-end JVM tests for the tunnel's transport policy and per-flow ordering. Android-only bits
@@ -151,6 +152,69 @@ class VpnTunnelIntegrationTest {
         val answer = dataPackets.single().payload
         assertEquals(0x51, ((answer[2].toInt() and 0xFF) shl 8) or (answer[3].toInt() and 0xFF))
     }
+
+    @Test
+    fun `full tunnel blocks DoT on TCP 853 for every destination`() {
+        val input = BlockingInputStream()
+        val output = SignallingOutputStream()
+        val tunnel = VpnTunnel(
+            input, output, responder(), fullTunnel = true,
+            udpRelay = CountingUdpRelay(), tcpRelay = testRelay(output), transportPolicy = policy(),
+        )
+
+        tunnel.start()
+        // A SYN to a non-strict DoT destination: the transport policy must reset it.
+        input.offer(tcpSyn(port = 853))
+        waitForDispatch(condition = { output.size() > 0 })
+        tunnel.stop()
+
+        val reply = Ipv4TcpCodec.parse(output.toByteArray())!!
+        assertEquals(Ipv4TcpCodec.Flags.RST or Ipv4TcpCodec.Flags.ACK, reply.flags and 0x3F)
+        assertEquals(0, reply.payload.size, "a reset carries no payload")
+    }
+
+    @Test
+    fun `full tunnel still relays tcp 443 without a policy decision against it`() {
+        val input = BlockingInputStream()
+        val output = SignallingOutputStream()
+        val tunnel = VpnTunnel(
+            input, output, responder(), fullTunnel = true,
+            udpRelay = CountingUdpRelay(), tcpRelay = testRelay(output), transportPolicy = policy(),
+        )
+
+        tunnel.start()
+        input.offer(tcpSyn(port = 443))
+        waitForDispatch(condition = { output.size() > 0 })
+        tunnel.stop()
+
+        val reply = Ipv4TcpCodec.parse(output.toByteArray())!!
+        assertTrue(
+            reply.flags and Ipv4TcpCodec.Flags.SYN != 0,
+            "an ordinary TLS destination must get a SYN-ACK, not a reset",
+        )
+    }
+
+    /** A relay wired to the tunnel output; a SYN never opens a socket, so protect() is unused. */
+    private fun testRelay(output: SignallingOutputStream): TcpRelay = TcpRelay(
+        protectSocket = { true },
+        writePacket = { packet -> synchronized(output) { output.write(packet) } },
+        transportPolicy = policy(),
+        onDohBlocked = {},
+    )
+
+    private fun tcpSyn(port: Int): ByteArray =
+        Ipv4TcpCodec.build(
+            // build() swaps endpoints (it is a response builder): give it the swapped tuple so the
+            // bytes on the wire carry src=10.0.0.1:40000 -> dst=10.0.0.5:port (a client segment).
+            request = Ipv4TcpPacket(
+                sourceAddress = 0x0A000005, destinationAddress = 0x0A000001,
+                sourcePort = port, destinationPort = 40_000,
+                sequenceNumber = 0L, acknowledgmentNumber = 0L, flags = 0,
+                window = 65_535, payload = EMPTY, identification = 1, ttl = 64, tcpHeaderLength = 20,
+            ),
+            payload = EMPTY, sequenceNumber = 100L, acknowledgmentNumber = 0L,
+            flags = Ipv4TcpCodec.Flags.SYN,
+        )
 
     private fun tcp(seq: Long, flags: Int, payload: ByteArray = ByteArray(0), ack: Long = 0L): ByteArray =
         Ipv4TcpCodec.build(
