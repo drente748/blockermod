@@ -46,6 +46,8 @@ class BlockerVpnService : VpnService() {
     private var tunnelDescriptor: ParcelFileDescriptor? = null
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
     private var blocklist: AssetRules.BlocklistHandle? = null
+    private var bypassHandle: AssetRules.BlocklistHandle? = null
+    private var unsupportedHandle: AssetRules.BlocklistHandle? = null
     private var upstreamResolver: UpstreamResolver? = null
     private var fullTunnel: Boolean = false
     private var tunnelOutput: java.io.OutputStream? = null
@@ -146,6 +148,16 @@ class BlockerVpnService : VpnService() {
         } catch (exception: Exception) {
             closeQuietly(tunnelDescriptor)
             tunnelDescriptor = null
+            // Fail closed means failing clean too: no half-built engine may keep resources open.
+            blocklist?.close()
+            blocklist = null
+            bypassHandle?.close()
+            bypassHandle = null
+            unsupportedHandle?.close()
+            unsupportedHandle = null
+            upstreamResolver?.close()
+            upstreamResolver = null
+            responder = null
 
             val message = exception.message ?: exception.javaClass.simpleName
             Log.e(TAG, "the tunnel could not be started", exception)
@@ -169,6 +181,10 @@ class BlockerVpnService : VpnService() {
         upstreamResolver = null
         blocklist?.close()
         blocklist = null
+        bypassHandle?.close()
+        bypassHandle = null
+        unsupportedHandle?.close()
+        unsupportedHandle = null
         super.onDestroy()
     }
 
@@ -305,15 +321,18 @@ class BlockerVpnService : VpnService() {
             InMemoryDomainMatcher(emptySet())
         }
 
-        // Fail closed for the other rule sources too: no engine with a missing blocklist.
-        val bypassBlocklist = AssetRules.openMatcher(this, AssetRules.BYPASS_ASSET)
-        val unsupportedBlocklist = AssetRules.openMatcher(this, AssetRules.UNSUPPORTED_ASSET)
+        // Fail closed for the other rule sources too: no engine with a missing blocklist. The
+        // handles are kept for the engine lifetime so the mapped matchers always have a live file.
+        val bypass = AssetRules.openMatcher(this, AssetRules.BYPASS_ASSET)
+        bypassHandle = bypass
+        val unsupported = AssetRules.openMatcher(this, AssetRules.UNSUPPORTED_ASSET)
+        unsupportedHandle = unsupported
 
         return PolicyEngine(
             allowlist = allowlist,
             adultBlocklist = handle.matcher,
-            bypassBlocklist = bypassBlocklist,
-            unsupportedEngineBlocklist = unsupportedBlocklist,
+            bypassBlocklist = bypass.matcher,
+            unsupportedEngineBlocklist = unsupported.matcher,
             safeSearchTable = safeSearchTable,
             lockoutPolicy = NoOpLockoutPolicy(),
         )

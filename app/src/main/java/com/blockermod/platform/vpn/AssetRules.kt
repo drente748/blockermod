@@ -4,8 +4,11 @@ import android.content.Context
 import com.blockermod.core.DomainMatcher
 import com.blockermod.core.matcher.BinarySearchDomainMatcher
 import com.blockermod.core.policy.SafeSearchTable
+import java.io.FileDescriptor
+import java.io.FileInputStream
 import java.io.IOException
 import java.nio.ByteBuffer
+import java.nio.channels.FileChannel
 
 /**
  * Loads the rule sets that ship with the application.
@@ -52,11 +55,7 @@ internal object AssetRules {
     @Throws(IOException::class)
     fun openBlocklist(context: Context): BlocklistHandle {
         context.assets.openFd(BLOCKLIST_ASSET).use { asset ->
-            val descriptor = android.os.ParcelFileDescriptor.dup(asset.fileDescriptor)
-            val stream = java.io.FileInputStream(descriptor.fileDescriptor)
-            val buffer = stream.channel.map(java.nio.channels.FileChannel.MapMode.READ_ONLY, 0L, stream.channel.size())
-            stream.close()
-            return BlocklistHandle(BinarySearchDomainMatcher(buffer), descriptor)
+            return openPacked(asset.fileDescriptor, asset.startOffset, asset.declaredLength)
         }
     }
 
@@ -64,7 +63,7 @@ internal object AssetRules {
      * Reads the runtime allowlist shipped with the application.
      */
     @Throws(IOException::class)
-    fun readAllowlist(context: Context): com.blockermod.core.DomainMatcher {
+    fun readAllowlist(context: Context): DomainMatcher {
         val rules = context.assets.open(ALLOWLIST_ASSET).bufferedReader().useLines { lines ->
             lines.map { it.trim() }
                 .filter { it.isNotEmpty() && !it.startsWith("#") }
@@ -75,16 +74,65 @@ internal object AssetRules {
 
     /**
      * Opens a packed domain list as a matcher, from any of the packed assets.
+     *
+     * The caller owns the returned handle and must close it: the file descriptor stays open for
+     * the lifetime of the matcher so the memory map always has a live backing file.
      */
     @Throws(IOException::class)
-    fun openMatcher(context: Context, assetName: String): DomainMatcher {
+    fun openMatcher(context: Context, assetName: String): BlocklistHandle {
         context.assets.openFd(assetName).use { asset ->
-            val descriptor = android.os.ParcelFileDescriptor.dup(asset.fileDescriptor)
-            val stream = java.io.FileInputStream(descriptor.fileDescriptor)
-            val buffer = stream.channel.map(java.nio.channels.FileChannel.MapMode.READ_ONLY, 0L, stream.channel.size())
-            stream.close()
-            descriptor.close()
-            return BinarySearchDomainMatcher(buffer)
+            return openPacked(asset.fileDescriptor, asset.startOffset, asset.declaredLength)
+        }
+    }
+
+    /**
+     * Duplicates an asset file descriptor and maps exactly the region the asset descriptor
+     * points at.
+     *
+     * An AssetFileDescriptor wraps the whole APK: its file descriptor is the base APK and the
+     * actual entry starts at [startOffset] for [declaredLength] bytes. Mapping from offset 0 with
+     * the full channel size would parse the ZIP header as a packed blocklist and fail closed at
+     * startup, so the region boundaries must always be used.
+     *
+     * The duplicated descriptor is kept open for the lifetime of the returned handle; the mapped
+     * buffer must never outlive it.
+     */
+    @Throws(IOException::class)
+    fun openPacked(fd: FileDescriptor, startOffset: Long, declaredLength: Long): BlocklistHandle {
+        val descriptor = try {
+            android.os.ParcelFileDescriptor.dup(fd)
+        } catch (exception: IOException) {
+            throw IOException("the asset descriptor could not be duplicated", exception)
+        }
+        val buffer = try {
+            mapAssetRegion(descriptor.fileDescriptor, startOffset, declaredLength)
+        } catch (exception: IOException) {
+            try {
+                descriptor.close()
+            } catch (ignored: IOException) {
+                // the descriptor is already closed
+            }
+            throw exception
+        }
+        return BlocklistHandle(BinarySearchDomainMatcher(buffer), descriptor)
+    }
+
+    /**
+     * Maps exactly [startOffset, startOffset + declaredLength) of the file into memory.
+     *
+     * Pure JVM helper so tests can verify that the map starts at the asset offset instead of the
+     * file start; the Android callers pass the AssetFileDescriptor boundaries.
+     */
+    @Throws(IOException::class)
+    internal fun mapAssetRegion(fd: FileDescriptor, startOffset: Long, declaredLength: Long): ByteBuffer {
+        FileInputStream(fd).use { stream ->
+            val channel = stream.channel
+            if (startOffset < 0L || declaredLength <= 0L || startOffset + declaredLength > channel.size()) {
+                throw IOException(
+                    "invalid asset region: offset=$startOffset length=$declaredLength size=${channel.size()}",
+                )
+            }
+            return channel.map(FileChannel.MapMode.READ_ONLY, startOffset, declaredLength)
         }
     }
 
@@ -98,7 +146,7 @@ internal object AssetRules {
     }
 
     /**
-     * A mapped blocklist and the descriptor that keeps it alive.
+     * A mapped packed list and the descriptor that keeps it alive.
      */
     class BlocklistHandle(
         val matcher: DomainMatcher,
