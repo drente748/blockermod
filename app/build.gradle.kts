@@ -78,6 +78,6 @@ dependencies {
     testImplementation(kotlin("test-junit"))
 
     androidTestImplementation(kotlin("test-junit"))
-    androidTestImplementation("androidx.test:runner:1.6.2")
-    androidTestImplementation("androidx.test.ext:junit:1.2.1")
+    androidTestImplementation(libs.androidx.test.runner)
+    androidTestImplementation(libs.androidx.test.ext.junit)
 }
