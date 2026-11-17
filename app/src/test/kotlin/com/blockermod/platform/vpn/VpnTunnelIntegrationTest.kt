@@ -131,9 +131,16 @@ class VpnTunnelIntegrationTest {
             DnsWire.buildQuery(0x51, "ordered.example", DnsTypes.A),
         )
         tunnel.start()
+        // Proper three-way handshake: SYN, learn server ISN from SYN-ACK, then ACK(seq=2, ack=ISN+1).
         input.offer(tcp(1L, Ipv4TcpCodec.Flags.SYN))
+        waitForDispatch(condition = { answers.isNotEmpty() })
+        val synAck = Ipv4TcpCodec.parse(answers.first())!!
+        val serverIsn = synAck.sequenceNumber
+        answers.clear()
+        input.offer(tcp(2L, Ipv4TcpCodec.Flags.ACK, ack = (serverIsn + 1L) and 0xFFFFFFFFL))
         framed.forEachIndexed { index, byte ->
-            input.offer(tcp(2L + index, Ipv4TcpCodec.Flags.ACK, byteArrayOf(byte)))
+            // SYN seq=1 consumed one number; the pure ACK did not. Data starts at seq=2.
+            input.offer(tcp(2L + index, Ipv4TcpCodec.Flags.ACK, byteArrayOf(byte), ack = (serverIsn + 1L) and 0xFFFFFFFFL))
         }
         Thread.sleep(600)
         tunnel.stop()
@@ -145,7 +152,7 @@ class VpnTunnelIntegrationTest {
         assertEquals(0x51, ((answer[2].toInt() and 0xFF) shl 8) or (answer[3].toInt() and 0xFF))
     }
 
-    private fun tcp(seq: Long, flags: Int, payload: ByteArray = ByteArray(0)): ByteArray =
+    private fun tcp(seq: Long, flags: Int, payload: ByteArray = ByteArray(0), ack: Long = 0L): ByteArray =
         Ipv4TcpCodec.build(
             // build() swaps endpoints (it is a response builder): give it the swapped tuple so the
             // bytes on the wire carry src=10.0.0.1:40000 -> dst=10.0.0.3:53 (a client DNS segment).
@@ -155,7 +162,7 @@ class VpnTunnelIntegrationTest {
                 sequenceNumber = 0L, acknowledgmentNumber = 0L, flags = 0,
                 window = 65_535, payload = EMPTY, identification = 1, ttl = 64, tcpHeaderLength = 20,
             ),
-            payload = payload, sequenceNumber = seq, acknowledgmentNumber = 0L, flags = flags,
+            payload = payload, sequenceNumber = seq, acknowledgmentNumber = ack, flags = flags,
         )
 
     private fun responder(): DnsResponder = DnsResponder(

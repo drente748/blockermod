@@ -3,6 +3,8 @@ package com.blockermod.platform.vpn
 import com.blockermod.core.dns.DnsTcpExchange
 import com.blockermod.core.dns.DnsTcpTransport
 import com.blockermod.core.dns.DnsTypes
+import com.blockermod.core.dns.extractQuestion
+import com.blockermod.core.dns.sameQuestion
 import com.blockermod.core.dns.frameDnsTcp
 import com.blockermod.core.dns.isDnsTruncated
 import java.io.IOException
@@ -56,7 +58,13 @@ internal class ReusableDnsSocket(
 
     /** Sends one query to [server] and returns the raw response, or null when the exchange fails. */
     @Synchronized
-    fun exchange(query: ByteArray, server: InetAddress, network: Any?, timeoutMillis: Int): ByteArray? {
+    fun exchange(
+        query: ByteArray,
+        server: InetAddress,
+        network: Any?,
+        timeoutMillis: Int,
+        port: Int = UpstreamResolver.DNS_PORT,
+    ): ByteArray? {
         val current = socket
         if (current == null || current.isClosed || network != boundNetwork) {
             closeSocket()
@@ -77,8 +85,8 @@ internal class ReusableDnsSocket(
         val active = socket ?: return null
         return try {
             active.soTimeout = timeoutMillis
-            active.connect(InetSocketAddress(server, UpstreamResolver.DNS_PORT))
-            active.send(DatagramPacket(query, query.size, server, UpstreamResolver.DNS_PORT))
+            active.connect(InetSocketAddress(server, port))
+            active.send(DatagramPacket(query, query.size, server, port))
 
             val buffer = ByteArray(UpstreamResolver.MAX_RESPONSE_SIZE)
             val packet = DatagramPacket(buffer, buffer.size)
@@ -109,7 +117,8 @@ internal class ReusableDnsSocket(
         if (query.size < 2 || response.size < 12) return false
         val sameId = query[0] == response[0] && query[1] == response[1]
         val isResponse = response[2].toInt() and 0x80 != 0
-        return sameId && isResponse
+        // Match the question section as well (case-insensitive), consistent with the TCP path.
+        return sameId && isResponse && sameQuestion(extractQuestion(query), extractQuestion(response))
     }
 }
 
@@ -125,10 +134,13 @@ internal class UpstreamResolver(
     private val upstreamServers: () -> List<InetAddress>,
     private val activeNetwork: () -> Any?,
     private val timeoutMillis: Int = TIMEOUT_MILLIS,
+    private val tcpTimeoutMillis: Int = TCP_TIMEOUT_MILLIS,
+    private val dnsPort: Int = DNS_PORT,
 ) : DnsUpstream, AutoCloseable {
 
     private val socket = ReusableDnsSocket(socketBinder)
-    private val tcpExchange = DnsTcpExchange()
+    // A single absolute deadline per TCP exchange, never renewed on each read.
+    private val tcpExchange = DnsTcpExchange(readTimeoutMillis = tcpTimeoutMillis)
 
     override fun lookup(host: String, type: Int): DnsWire.Answer {
         val query = DnsWire.buildQuery(nextId(), host, type)
@@ -175,13 +187,14 @@ internal class UpstreamResolver(
             // protect() is called through the same binder used by relays: never let the retry
             // socket re-enter the VPN.
             if (!tcpProtect(raw)) throw IOException("socket could not be protected")
-            raw.soTimeout = TCP_TIMEOUT_MILLIS
-            raw.connect(InetSocketAddress(server, DNS_PORT), TCP_TIMEOUT_MILLIS)
+            raw.soTimeout = tcpTimeoutMillis
+            raw.connect(InetSocketAddress(server, dnsPort), tcpTimeoutMillis)
             raw.tcpNoDelay = true
             val socket = raw
             object : DnsTcpTransport {
                 override val input: java.io.InputStream = socket.getInputStream()
                 override val output: java.io.OutputStream = socket.getOutputStream()
+                override fun setReadTimeout(millis: Int) { socket.soTimeout = millis }
                 override fun close() = socket.close()
             }
         } catch (exception: IOException) {
@@ -195,7 +208,7 @@ internal class UpstreamResolver(
     fun exchange(query: ByteArray): ByteArray? {
         val network = activeNetwork()
         for (server in upstreamServers()) {
-            socket.exchange(query, server, network, timeoutMillis)?.let { return it }
+            socket.exchange(query, server, network, timeoutMillis, dnsPort)?.let { return it }
         }
         return null
     }

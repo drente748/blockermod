@@ -5,6 +5,7 @@ import java.io.ByteArrayOutputStream
 import java.io.IOException
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 class DnsTcpExchangeTest {
 
@@ -91,5 +92,39 @@ class DnsTcpExchangeTest {
 
         // The echo never matches; the peer then closes, so the exchange ends Closed (fail closed).
         assertEquals(DnsTcpExchange.Outcome.Closed, DnsTcpExchange().exchange(transport, query))
+    }
+
+    @Test
+    fun `absolute deadline is not renewed by each read`() {
+        // A peer dribbling one byte per read must NOT keep the exchange alive forever: the deadline
+        // is computed once. A fake clock advances 40 ms per call; with a 100 ms budget the loop ends
+        // after ~3 reads, far below MAX_READS.
+        var now = 0L
+        var reads = 0
+        val dribble = object : java.io.InputStream() {
+            override fun read(): Int = 1
+            override fun read(bytes: ByteArray, off: Int, len: Int): Int {
+                reads++
+                // A valid 2-byte length prefix (30) followed by body bytes that never complete the
+                // message: the framer stays pending, so only the absolute deadline can end this.
+                bytes[off] = when (reads) {
+                    1 -> 0.toByte()
+                    2 -> 30.toByte()
+                    else -> 1.toByte()
+                }
+                return 1
+            }
+        }
+        val transport = object : DnsTcpTransport {
+            override val input = dribble
+            override val output = ByteArrayOutputStream()
+            override fun close() = Unit
+        }
+        val exchange = DnsTcpExchange(readTimeoutMillis = 100, nowNanos = { now.also { now += 40_000_000L } })
+
+        val outcome = exchange.exchange(transport, ByteArray(12))
+
+        assertEquals(DnsTcpExchange.Outcome.Closed, outcome)
+        assertTrue(reads < 64, "the absolute deadline must stop the loop before MAX_READS (reads=$reads)")
     }
 }

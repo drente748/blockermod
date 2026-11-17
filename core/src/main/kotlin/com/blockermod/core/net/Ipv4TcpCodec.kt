@@ -30,6 +30,8 @@ class Ipv4TcpPacket(
     val ttl: Int,
     val tcpHeaderLength: Int,
     val ipHeaderLength: Int = 20,
+    /** MSS advertised by the peer in its SYN (0 when absent). */
+    val mss: Int = 0,
 )
 
 /**
@@ -85,6 +87,7 @@ object Ipv4TcpCodec {
 
         val flags = packet[tcpOffset + 13].toInt() and 0x3F
         val window = readU16(packet, tcpOffset + 14)
+        val mss = parseMssOption(packet, tcpOffset + MIN_TCP_HEADER_SIZE, tcpOffset + tcpHeaderLength)
         val payload = packet.copyOfRange(tcpOffset + tcpHeaderLength, tcpOffset + (totalLength - ipHeaderLength))
 
         return Ipv4TcpPacket(
@@ -101,7 +104,26 @@ object Ipv4TcpCodec {
             ttl = packet[8].toInt() and 0xFF,
             tcpHeaderLength = tcpHeaderLength,
             ipHeaderLength = ipHeaderLength,
+            mss = mss,
         )
+    }
+
+    /** Reads the MSS TCP option (kind 2, length 4) from a segment's option bytes. */
+    private fun parseMssOption(packet: ByteArray, start: Int, end: Int): Int {
+        var offset = start
+        while (offset + 2 <= end) {
+            val kind = packet[offset].toInt() and 0xFF
+            if (kind == 0) break // End Of Option List
+            if (kind == 1) { // No-Operation
+                offset++
+                continue
+            }
+            val length = packet[offset + 1].toInt() and 0xFF
+            if (length < 2 || offset + length > end) break
+            if (kind == 2 && length == 4) return readU16(packet, offset + 2)
+            offset += length
+        }
+        return 0
     }
 
     /**
@@ -161,6 +183,12 @@ object Ipv4TcpCodec {
 
     /** MSS option (kind 2, length 4, value [value]) for a SYN/SYN-ACK. */
     fun mssOption(value: Int): ByteArray = byteArrayOf(2, 4, (value ushr 8).toByte(), value.toByte())
+
+    /** Effective send MSS: the peer's advertised value clamped to the tunnel MTU payload (1460). */
+    fun effectiveMss(packet: Ipv4TcpPacket): Int =
+        if (packet.mss in 1..MAX_MSS) packet.mss else MAX_MSS
+
+    const val MAX_MSS: Int = 1460
 
     /** A RST packet closing the connection in the given direction. */
     fun reset(request: Ipv4TcpPacket): ByteArray = build(
