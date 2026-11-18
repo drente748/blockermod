@@ -6,7 +6,7 @@ import java.util.Locale
 /**
  * Normalization shared by every matcher implementation.
  */
-internal object DomainNormalizer {
+object DomainNormalizer {
 
     /**
      * Normalizes a domain: trimmed, lower cased, without the trailing dot, and converted to

@@ -7,6 +7,7 @@ import com.blockermod.core.dns.DnsCodec
 import com.blockermod.core.dns.DnsQuery
 import com.blockermod.core.dns.DnsRecord
 import com.blockermod.core.dns.DnsTypes
+import com.blockermod.core.matcher.DomainNormalizer
 import com.blockermod.core.policy.LocalUseNames
 import com.blockermod.core.policy.PolicyEngine
 
@@ -51,18 +52,23 @@ internal class LocalDnsResolver(
     /** Clears the resolver cache; called when the upstream network changes. */
     fun clearCache() = cache.clear()
 
-    private fun resolveQuery(query: DnsQuery, udpPayloadSize: Int?): ByteArray = when (val decision = if (bypassPolicy) BlockingResult.Allowed else policy.evaluate(query.question.name)) {
-        is BlockingResult.Blocked -> {
-            onBlocked(decision.reason)
-            DnsCodec.buildNxDomain(query)
+    private fun resolveQuery(query: DnsQuery, udpPayloadSize: Int?): ByteArray {
+        // Normalize ONCE at the boundary: cache keys and policy use the canonical name, while the
+        // raw question bytes stay untouched in the response (0x20 clients expect their case back).
+        val name = DomainNormalizer.normalize(query.question.name) ?: query.question.name.lowercase()
+        return when (val decision = if (bypassPolicy) BlockingResult.Allowed else policy.evaluate(name)) {
+            is BlockingResult.Blocked -> {
+                onBlocked(decision.reason)
+                DnsCodec.buildNxDomain(query)
+            }
+            is BlockingResult.Rewrite -> rewrite(query, decision.cnameTarget, udpPayloadSize)
+            is BlockingResult.Error -> DnsCodec.buildServFail(query)
+            is BlockingResult.Allowed -> resolveAllowed(query, name, udpPayloadSize)
         }
-        is BlockingResult.Rewrite -> rewrite(query, decision.cnameTarget, udpPayloadSize)
-        is BlockingResult.Error -> DnsCodec.buildServFail(query)
-        is BlockingResult.Allowed -> resolveAllowed(query, udpPayloadSize)
     }
 
-    private fun resolveAllowed(query: DnsQuery, udpPayloadSize: Int?): ByteArray {
-        val answer = resolveRecords(query.question.name, query.question.type, depth = 0)
+    private fun resolveAllowed(query: DnsQuery, name: String, udpPayloadSize: Int?): ByteArray {
+        val answer = resolveRecords(name, query.question.type, depth = 0)
         return when (answer.rcode) {
             DnsWire.RCODE_NXDOMAIN -> DnsCodec.buildNxDomain(query)
             DnsWire.RCODE_NOERROR -> {
@@ -70,7 +76,7 @@ internal class LocalDnsResolver(
                 else if (hasBlockedCname(answer.records)) {
                     onBlocked(BlockReason.BLOCKLIST_ADULT)
                     DnsCodec.buildNxDomain(query)
-                } else if (containsPrivateAddress(answer.records) && !isLocalUseName(query.question.name)) {
+                } else if (containsPrivateAddress(answer.records) && !isLocalUseName(name)) {
                     // DNS rebinding / local-network leak on a public name: fail closed. Local-use
                     // names are allowed to point at private addresses by definition.
                     DnsCodec.buildServFail(query)
@@ -204,6 +210,9 @@ internal class LocalDnsResolver(
         byteArrayOf((message.size ushr 8).toByte(), message.size.toByte()) + message
 
     private fun cacheKey(host: String, type: Int): String = "$host/$type"
+    // Known limit: the key does not distinguish the DNSSEC DO bit, so a signed and unsigned query
+    // for the same name/type share one cache entry. The answer records are identical; only EDNS
+    // flags differ and responses are rebuilt from the current query.
 
     /**
      * True for names reserved for local use, which are expected to resolve to private addresses.

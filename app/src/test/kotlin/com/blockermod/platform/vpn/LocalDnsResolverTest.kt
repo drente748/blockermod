@@ -162,6 +162,36 @@ class LocalDnsResolverTest {
     }
 
     @Test
+    fun `case and trailing dot variants share one cache entry`() {
+        val upstream = CountingUpstream { host, type ->
+            DnsWire.Answer(
+                DnsWire.RCODE_NOERROR,
+                listOf(DnsRecord(host, type, 1, 120, byteArrayOf(93.toByte(), 184.toByte(), 216.toByte(), 34.toByte()))),
+            )
+        }
+        val resolver = resolver(upstream)
+
+        resolver.resolve(DnsWire.buildQuery(30, "MiXeD.Example.COM.", DnsTypes.A))
+        resolver.resolve(DnsWire.buildQuery(31, "mixed.example.com", DnsTypes.A))
+        resolver.resolve(DnsWire.buildQuery(32, "MIXED.EXAMPLE.COM", DnsTypes.A))
+
+        assertEquals(1, upstream.calls, "case/dot variants must hit the same cache entry")
+    }
+
+    @Test
+    fun `the echoed question keeps the client bytes verbatim`() {
+        val resolver = resolver(CountingUpstream())
+        val query = DnsWire.buildQuery(34, "MiXeD.Example.COM", DnsTypes.A)
+        val questionBytes = query.copyOfRange(12, query.size)
+
+        val response = resolver.resolve(DnsWire.buildQuery(35, "mixed.example.com", DnsTypes.A))
+        val mixed = resolver.resolve(query)!!
+
+        assertEquals(questionBytes.toList(), mixed.copyOfRange(12, 12 + questionBytes.size).toList())
+        assertNotNull(response)
+    }
+
+    @Test
     fun `DNS over TCP responses are length framed`() {
         val resolver = resolver(CountingUpstream())
 
