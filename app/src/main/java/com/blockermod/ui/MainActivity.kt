@@ -68,9 +68,12 @@ class MainActivity : Activity() {
     override fun onStart() {
         super.onStart()
         scope = CoroutineScope(Dispatchers.Main + SupervisorJob()).also { active ->
+            active.launch { EngineStatus.state.collect { render(it) } }
             active.launch {
-                EngineStatus.state.collect { render(it) }
+                EngineStatus.privateDns.collect { warningLabel.visibility =
+                    if (it) View.VISIBLE else View.GONE }
             }
+            active.launch { EngineStatus.blockedTodayFlow.collect { renderCounter(it) } }
         }
         refreshCounter()
     }
@@ -91,11 +94,13 @@ class MainActivity : Activity() {
 
         val running = state is BlockingState.Active || state is BlockingState.Starting
         toggleButton.setText(if (running) R.string.stop_protection else R.string.start_protection)
-        warningLabel.visibility = if (EngineStatus.privateDnsActive()) View.VISIBLE else View.GONE
     }
 
     private fun refreshCounter() {
-        val blocked = EngineStatus.blockedToday()
+        renderCounter(EngineStatus.blockedToday())
+    }
+
+    private fun renderCounter(blocked: Long) {
         counterLabel.text = if (blocked == 0L) {
             getString(R.string.blocked_today_zero)
         } else {
