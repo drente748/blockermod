@@ -60,6 +60,70 @@ class TlsSniInspectorTest {
     }
 
     @Test
+    fun `a client hello split across two tls records still yields the sni`() {
+        val hello = clientHello("cloudflare-dns.com")
+        val handshake = hello.copyOfRange(5, hello.size)
+        val first = record(handshake.copyOfRange(0, 10))
+        val second = record(handshake.copyOfRange(10, handshake.size))
+
+        val result = TlsSniInspector.inspect(first + second)
+
+        assertEquals(TlsInspection.SNI, result.kind)
+        assertEquals("cloudflare-dns.com", result.serverName)
+    }
+
+    @Test
+    fun `a large client hello with the sni at the end is still inspected`() {
+        // >16 KiB handshake with a large padding extension before the SNI (post-quantum shape).
+        val result = TlsSniInspector.inspect(largeClientHello("dns.google"))
+
+        assertEquals(TlsInspection.SNI, result.kind)
+        assertEquals("dns.google", result.serverName)
+    }
+
+    @Test
+    fun `ech across records is still detected`() {
+        val hello = clientHello("public.example.com", ech = true)
+        val handshake = hello.copyOfRange(5, hello.size)
+        val bytes = record(handshake.copyOfRange(0, 7)) + record(handshake.copyOfRange(7, handshake.size))
+
+        assertEquals(TlsInspection.ECH, TlsSniInspector.inspect(bytes).kind)
+    }
+
+    @Test
+    fun `random bytes never throw`() {
+        val random = java.util.Random(9)
+        repeat(500) {
+            val bytes = ByteArray(random.nextInt(128))
+            random.nextBytes(bytes)
+            TlsSniInspector.inspect(bytes) // no exception, any kind is acceptable
+        }
+    }
+
+    private fun largeClientHello(host: String): ByteArray {
+        val hostBytes = host.toByteArray(Charsets.US_ASCII)
+        val serverName = byteArrayOf(0x00) + u16(hostBytes.size) + hostBytes
+        val sni = u16(0x0000) + u16(serverName.size + 2) + u16(serverName.size) + serverName
+        val padding = u16(0x0015) + u16(20_000) + ByteArray(20_000)
+        val extensions = padding + sni
+        val body = u16(0x0303) + ByteArray(32) + byteArrayOf(0) +
+            u16(2) + byteArrayOf(0x13, 0x01) + byteArrayOf(1, 0) +
+            u16(extensions.size) + extensions
+        val handshake = byteArrayOf(0x01) + u24(body.size) + body
+        // Split across several TLS records so no record exceeds 16 KiB.
+        val out = java.io.ByteArrayOutputStream()
+        var offset = 0
+        while (offset < handshake.size) {
+            val length = minOf(14_000, handshake.size - offset)
+            out.write(byteArrayOf(0x16, 0x03, 0x03))
+            out.write(u16(length))
+            out.write(handshake, offset, length)
+            offset += length
+        }
+        return out.toByteArray()
+    }
+
+    @Test
     fun `supported groups extension does not trigger a false ECH detection`() {
         // 0x000A is supported_groups and appears in virtually every real ClientHello. It must NOT
         // be confused with ESNI, otherwise the visible SNI is discarded and DoH blocking dies.
@@ -89,6 +153,9 @@ class TlsSniInspectorTest {
         val handshake = byteArrayOf(0x01) + u24(body.size) + body
         return byteArrayOf(0x16, 0x03, 0x03) + u16(handshake.size) + handshake
     }
+
+    private fun record(payload: ByteArray): ByteArray =
+        byteArrayOf(0x16, 0x03, 0x03) + u16(payload.size) + payload
 
     private fun u16(value: Int): ByteArray = byteArrayOf((value ushr 8).toByte(), value.toByte())
 

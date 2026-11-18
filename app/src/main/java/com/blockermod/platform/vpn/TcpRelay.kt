@@ -395,7 +395,9 @@ internal class TcpRelay(
         const val REAP_INTERVAL_MILLIS: Long = 5_000L
         const val MSS: Int = 1460
         const val SEGMENT_SIZE: Int = 1460
-        const val MAX_TLS_PREFILTER: Int = 16 * 1024
+        // A ClientHello may span several TLS records (post-quantum keys); 64 KiB matches the
+        // TcpStreamBuffer limit. Worst case 128 flows x 64 KiB = 8 MiB (C2).
+        const val MAX_TLS_PREFILTER: Int = 64 * 1024
         const val DOT_PORT: Int = 853
         val EMPTY = ByteArray(0)
 

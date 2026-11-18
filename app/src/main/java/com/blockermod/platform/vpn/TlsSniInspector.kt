@@ -1,5 +1,7 @@
 package com.blockermod.platform.vpn
 
+import java.io.ByteArrayOutputStream
+
 /**
  * Result of inspecting an accumulated TLS client stream.
  *
@@ -19,10 +21,11 @@ internal data class TlsInspectionResult(
 /**
  * Stream-based TLS ClientHello inspector.
  *
- * The caller feeds accumulated TCP payload (which may span several segments and TLS records). The
- * parser validates TLS record lengths and the ClientHello structure and never reads past the bytes
- * it has — it returns UNKNOWN while more bytes are needed. The accumulation buffer is bounded by the
- * caller so a peer cannot grow it without limit.
+ * The caller feeds accumulated TCP payload (which may span several segments AND several TLS
+ * handshake records). The parser reassembles handshake bytes across records until the full
+ * ClientHello is present, validates its structure, and never reads past the bytes it has — it
+ * returns UNKNOWN while more bytes are needed. The caller bounds the accumulation buffer
+ * (TcpRelay.MAX_TLS_PREFILTER, 64 KiB); the worst case is 128 flows x 64 KiB = 8 MiB (C2).
  */
 internal object TlsSniInspector {
 
@@ -33,59 +36,73 @@ internal object TlsSniInspector {
     // based DoH blocking.
     private const val EXT_ESNI = 0xFFCE
 
+    private val UNKNOWN = TlsInspectionResult(TlsInspection.UNKNOWN)
+    private val MALFORMED = TlsInspectionResult(TlsInspection.MALFORMED)
+
     /** Checks whether the stream starts with a TLS handshake record. */
     fun looksLikeTlsClientStream(bytes: ByteArray): Boolean =
         bytes.size >= 5 &&
             (bytes[0].toInt() and 0xFF) == 0x16 && // handshake record
             (bytes[1].toInt() and 0xFF) == 0x03 // TLS 3.x
 
-    /**
-     * Inspects accumulated bytes. Returns SNI/ECH/UNKNOWN/MALFORMED with no exception.
-     */
+    /** Inspects accumulated bytes. Returns SNI/ECH/UNKNOWN/MALFORMED with no exception. */
     fun inspect(bytes: ByteArray): TlsInspectionResult {
-        if (bytes.size < 5) return TlsInspectionResult(TlsInspection.UNKNOWN)
-        if (!looksLikeTlsClientStream(bytes)) return TlsInspectionResult(TlsInspection.MALFORMED)
+        if (bytes.size < 5) return UNKNOWN
+        if (!looksLikeTlsClientStream(bytes)) return MALFORMED
 
-        val recordLength = u16(bytes, 3)
-        if (recordLength > MAX_RECORD || bytes.size < 5 + recordLength) {
-            return TlsInspectionResult(TlsInspection.UNKNOWN)
+        // Reassemble the handshake stream across TLS records (C2).
+        val assembled = ByteArrayOutputStream()
+        var offset = 0
+        while (offset + 5 <= bytes.size) {
+            if (u8(bytes, offset) != 0x16) return MALFORMED
+            val recordLength = u16(bytes, offset + 3)
+            if (recordLength > MAX_RECORD) return MALFORMED
+            if (offset + 5 + recordLength > bytes.size) return UNKNOWN // record still arriving
+            assembled.write(bytes, offset + 5, recordLength)
+            offset += 5 + recordLength
+            if (assembled.size() > MAX_HANDSHAKE) return MALFORMED
+            if (assembled.size() >= 4) {
+                val handshakeLength = u24(assembled.toByteArray(), 1)
+                if (handshakeLength > MAX_HANDSHAKE) return MALFORMED
+                if (assembled.size() >= 4 + handshakeLength) break // complete ClientHello
+            }
         }
-        val recordEnd = 5 + recordLength
-        if (recordEnd > bytes.size) return TlsInspectionResult(TlsInspection.UNKNOWN)
+        return inspectHandshake(assembled.toByteArray())
+    }
 
-        var p = 5
-        if (p >= recordEnd || u8(bytes, p++) != 0x01) { // ClientHello
-            return TlsInspectionResult(TlsInspection.MALFORMED)
-        }
-        if (p + 3 > recordEnd) return TlsInspectionResult(TlsInspection.UNKNOWN)
+    private fun inspectHandshake(bytes: ByteArray): TlsInspectionResult {
+        if (bytes.size < 4) return UNKNOWN
+        var p = 0
+        if (u8(bytes, p++) != 0x01) return MALFORMED // ClientHello
         val handshakeLength = u24(bytes, p)
         p += 3
-        if (handshakeLength > MAX_HANDSHAKE) return TlsInspectionResult(TlsInspection.MALFORMED)
-        val handshakeEnd = minOf(p + handshakeLength, recordEnd)
+        if (handshakeLength > MAX_HANDSHAKE) return MALFORMED
+        if (bytes.size < 4 + handshakeLength) return UNKNOWN
+        val handshakeEnd = 4 + handshakeLength
 
-        if (p + 2 + 32 > handshakeEnd) return TlsInspectionResult(TlsInspection.UNKNOWN)
+        if (p + 2 + 32 > handshakeEnd) return UNKNOWN
         p += 2 + 32 // client version + random
 
-        if (p >= handshakeEnd) return TlsInspectionResult(TlsInspection.UNKNOWN)
+        if (p >= handshakeEnd) return UNKNOWN
         val sessionIdLength = u8(bytes, p++)
         p += sessionIdLength
-        if (p > handshakeEnd) return TlsInspectionResult(TlsInspection.UNKNOWN)
+        if (p > handshakeEnd) return UNKNOWN
 
-        if (p + 2 > handshakeEnd) return TlsInspectionResult(TlsInspection.UNKNOWN)
+        if (p + 2 > handshakeEnd) return UNKNOWN
         val cipherSuitesLength = u16(bytes, p)
         p += 2 + cipherSuitesLength
-        if (p > handshakeEnd) return TlsInspectionResult(TlsInspection.UNKNOWN)
+        if (p > handshakeEnd) return UNKNOWN
 
-        if (p >= handshakeEnd) return TlsInspectionResult(TlsInspection.UNKNOWN)
+        if (p >= handshakeEnd) return UNKNOWN
         val compressionLength = u8(bytes, p++)
         p += compressionLength
-        if (p > handshakeEnd) return TlsInspectionResult(TlsInspection.UNKNOWN)
+        if (p > handshakeEnd) return UNKNOWN
 
-        if (p + 2 > handshakeEnd) return TlsInspectionResult(TlsInspection.UNKNOWN)
+        if (p + 2 > handshakeEnd) return UNKNOWN
         val extensionsLength = u16(bytes, p)
         p += 2
-        val extensionsEnd = minOf(p + extensionsLength, handshakeEnd)
-        if (extensionsLength > handshakeEnd - p) return TlsInspectionResult(TlsInspection.UNKNOWN)
+        if (extensionsLength > handshakeEnd - p) return UNKNOWN
+        val extensionsEnd = p + extensionsLength
 
         var echSeen = false
         var sni: String? = null
@@ -93,17 +110,16 @@ internal object TlsSniInspector {
             val type = u16(bytes, p)
             val length = u16(bytes, p + 2)
             p += 4
-            if (p + length > extensionsEnd) return TlsInspectionResult(TlsInspection.UNKNOWN)
+            if (p + length > extensionsEnd) return UNKNOWN
             when (type) {
                 EXT_ENCRYPTED_CLIENT_HELLO, EXT_ESNI -> echSeen = true
                 EXT_SERVER_NAME -> sni = parseServerName(bytes, p, length)
             }
             p += length
         }
-        if (p != extensionsEnd) return TlsInspectionResult(TlsInspection.MALFORMED)
+        if (p != extensionsEnd) return MALFORMED
         if (echSeen) return TlsInspectionResult(TlsInspection.ECH, sni)
-        return if (sni == null) TlsInspectionResult(TlsInspection.UNKNOWN)
-        else TlsInspectionResult(TlsInspection.SNI, sni)
+        return if (sni == null) UNKNOWN else TlsInspectionResult(TlsInspection.SNI, sni)
     }
 
     private fun parseServerName(bytes: ByteArray, start: Int, length: Int): String? {

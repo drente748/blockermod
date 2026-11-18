@@ -25,7 +25,8 @@ android {
         minSdk = 26
         targetSdk = 37
         versionCode = 1
-        versionName = "0.1.0"
+        // First stable release (production/sale-ready). Bump versionCode for every subsequent APK.
+        versionName = "1.0.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
