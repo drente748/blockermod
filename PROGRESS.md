@@ -8,7 +8,7 @@
 |---|---|
 | المرحلة | 2 — إصلاح جذري مختبر للمحرك (A1–A3 مكتملة، B/C قيد التنفيذ) |
 | الوحدات | `:core` (Kotlin/JVM خالص) و`:app` (أندرويد)، `:app → :core` فقط |
-| الاختبارات | **273 اختبارًا** (168 في `:core` + 105 في `:app`) — انظر قسم التحقق |
+| الاختبارات | **288 اختبارًا** (171 في `:core` + 117 في `:app`) — انظر قسم التحقق |
 | Lint | يُتحقَّق منه في قسم التحقق أدناه |
 | القوائم | 154,844 نطاق إباحي + 16,458 نطاق التفاف/DNS مشفّر + 202 محرك بلا SafeSearch، من 6 مصادر مثبّتة |
 | وضع التشغيل | DNS-only (افتراضي، معتمد) + Full Tunnel (تجريبي، اختياري) |
@@ -182,8 +182,8 @@
   (لا كسر لهوية التوقيع)، بمخطط v2 (قرار نهائي).
 - `apksigner verify`: **Verifies**، v2=true، signer واحد، CN=BlockerMod.
 - `aapt dump badging`: package=com.blockermod، minSdk=26، targetSdk=37، وكل الأذونات موجودة.
-- النسخة الموقّعة النهائية: `C:\Users\pc\Desktop\opencode\blockermod-release-signed.apk`، SHA-256
-  `C2E7CC6FE11D8A8BED8F06CA7312CD39F86693FB2817B2E9B4E430AEB8B97953`.
+- النسخة الموقّعة النهائية (v1.0.0): `C:\Users\pc\Desktop\opencode\blockermod-release-signed.apk`،
+  SHA-256 `CC1E05652B7589C56E2E6E5D0E43EAE86E2CAE4B014D5E543581DBFB005F1647`.
 - محاولة تثبيت على Emulator API 37: **NOT RUN** — المحاكي بقي offline على هذه الآلة (قيد بيئة).
   التحقق النهائي من قابلية التثبيت يعتمد على `apksigner verify` (مرجع موثوق).
 

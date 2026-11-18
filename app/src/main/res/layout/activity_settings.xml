@@ -76,4 +76,12 @@
         android:text="@string/strict_resolver_hint"
         android:textSize="13sp" />
 
+    <Button
+        android:id="@+id/applyRestartButton"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="24dp"
+        android:text="@string/apply_restart"
+        android:visibility="gone" />
+
 </LinearLayout>
