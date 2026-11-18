@@ -1,7 +1,7 @@
 package com.blockermod.platform.vpn
 
 import android.content.Context
-import java.net.InetAddress
+import android.os.Build
 
 /**
  * Encrypted-resolver addresses routed into the tunnel so their DoT/DoH cannot bypass the filter.
@@ -32,14 +32,14 @@ internal object StrictResolverIps {
     private var routesList: List<String> = emptyList()
 
     @Volatile
-    private var addresses: Set<Int> = emptySet()
+    private var resolverSet: StrictResolverSet = StrictResolverSet(emptyList(), ::parseLiteral)
 
     /** Loads the address list from the asset. Must be called before the tunnel starts. */
     fun initialize(context: Context) {
         if (!STRICT_RESOLVER_IPS_ENABLED || routesList.isNotEmpty()) return
         val loaded = AssetRules.readStrictResolvers(context)
         routesList = loaded
-        addresses = loaded.mapNotNull { literal(it) }.toSet()
+        resolverSet = StrictResolverSet(loaded, ::parseLiteral)
     }
 
     /** Routes to add to the tunnel interface. */
@@ -47,19 +47,23 @@ internal object StrictResolverIps {
 
     /** True when the destination is a strict resolver and the feature is on. */
     fun isStrictResolver(destinationAddress: Int): Boolean =
-        enabled && addresses.contains(destinationAddress)
+        enabled && resolverSet.values.contains(destinationAddress)
 
     /** True when the port must be dropped for strict resolvers. */
     fun isDroppedPort(port: Int): Boolean = DROPPED_PORTS.contains(port)
 
-    /** True when the dotted-quad belongs to the loaded resolver set. */
-    fun containsAddress(address: String): Boolean = addresses.any { literal(address) == it }
+    /** O(1) after one parse of the incoming literal (C3). */
+    fun containsAddress(address: String): Boolean = resolverSet.contains(address)
 
-    private fun literal(value: String): Int? = try {
-        InetAddress.getByName(value).address.fold(0) { accumulator, byte ->
-            (accumulator shl 8) or (byte.toInt() and 0xFF)
-        }
-    } catch (exception: java.net.UnknownHostException) {
-        null
+    /** Numeric literal only: Android's parseNumericAddress on 33+, the pure-JVM helper before. */
+    private fun parseLiteral(value: String): Int? {
+        val parsed = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            android.net.InetAddresses.parseNumericAddress(value)
+        } else {
+            NumericAddresses.parse(value)
+        } ?: return null
+        val bytes = parsed.address
+        if (bytes.size != 4) return null // strict-resolver routes are IPv4 /32
+        return bytes.fold(0) { accumulator, byte -> (accumulator shl 8) or (byte.toInt() and 0xFF) }
     }
 }
