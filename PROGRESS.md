@@ -183,7 +183,11 @@
 - `apksigner verify`: **Verifies**، v2=true، signer واحد، CN=BlockerMod.
 - `aapt dump badging`: package=com.blockermod، minSdk=26، targetSdk=37، وكل الأذونات موجودة.
 - النسخة الموقّعة النهائية (v1.0.0): `C:\Users\pc\Desktop\opencode\blockermod-release-signed.apk`،
-  SHA-256 `CC1E05652B7589C56E2E6E5D0E43EAE86E2CAE4B014D5E543581DBFB005F1647`.
+  SHA-256 `955B37C60B9570F2EBFCB64B6798B94DE66F2B455D4AA956B97F4CFDF9D02E0D`.
+- **الواجهة التجارية (هذه الجولة)**: هوية بصرية كاملة — خلفية ليلية بتدرّج متوهج، بطاقات زجاجية
+  متداخلة (double-bezel)، أزرار حبّات مع أيقونة متجهة، مفاتيح مخصّصة، أيقونات درع/إعدادات/دليل،
+  حركات دخول خفيفة تعتمد transform/opacity فقط، وخطوط/ألوان موحّدة عبر `themes.xml` + `colors.xml`.
+  بلا مكتبات خارجية (APK ~5.0 MB)، ومع ذلك lint بلا أي ملاحظات.
 - محاولة تثبيت على Emulator API 37: **NOT RUN** — المحاكي بقي offline على هذه الآلة (قيد بيئة).
   التحقق النهائي من قابلية التثبيت يعتمد على `apksigner verify` (مرجع موثوق).
 

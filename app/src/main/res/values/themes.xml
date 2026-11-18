@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <!-- Premium dark identity. Pure platform theme: no external dependency, no reflection. -->
+    <style name="Theme.BlockerMod" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@drawable/bg_app</item>
+        <item name="android:colorAccent">@color/accent</item>
+        <item name="android:textColorPrimary">@color/text_primary</item>
+        <item name="android:textColorSecondary">@color/text_secondary</item>
+        <item name="android:statusBarColor">@color/bg_base</item>
+        <item name="android:navigationBarColor">@color/bg_base</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowContentOverlay">@null</item>
+        <item name="android:windowAnimationStyle">@style/WindowMotion</item>
+    </style>
+
+    <style name="WindowMotion">
+        <item name="android:activityOpenEnterAnimation">@anim/slide_in_right</item>
+        <item name="android:activityOpenExitAnimation">@anim/fade_out</item>
+        <item name="android:activityCloseEnterAnimation">@anim/fade_in</item>
+        <item name="android:activityCloseExitAnimation">@anim/slide_out_right</item>
+    </style>
+
+    <!-- Shared text treatments. The empty parent makes the Type.X names resolve. -->
+    <style name="Type" />
+
+    <style name="Type.Eyebrow">
+        <item name="android:textSize">11sp</item>
+        <item name="android:textColor">@color/accent</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:letterSpacing">0.18</item>
+    </style>
+
+    <style name="Type.Title">
+        <item name="android:textSize">30sp</item>
+        <item name="android:textColor">@color/text_primary</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:letterSpacing">-0.01</item>
+    </style>
+
+    <style name="Type.Section">
+        <item name="android:textSize">16sp</item>
+        <item name="android:textColor">@color/text_primary</item>
+        <item name="android:textStyle">bold</item>
+    </style>
+
+    <style name="Type.Body">
+        <item name="android:textSize">13sp</item>
+        <item name="android:textColor">@color/text_secondary</item>
+        <item name="android:lineSpacingExtra">2dp</item>
+    </style>
+
+</resources>

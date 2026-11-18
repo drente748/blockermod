@@ -1,66 +1,185 @@
 <?xml version="1.0" encoding="utf-8"?>
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
-    android:layout_height="match_parent">
+    android:layout_height="match_parent"
+    android:fillViewport="true">
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:padding="24dp">
+        android:paddingStart="24dp"
+        android:paddingEnd="24dp"
+        android:paddingTop="28dp"
+        android:paddingBottom="32dp"
+        android:layoutAnimation="@anim/layout_fade_slide">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="@drawable/bg_badge"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
+            android:paddingTop="5dp"
+            android:paddingBottom="5dp"
+            android:text="@string/guide_eyebrow"
+            style="@style/Type.Eyebrow" />
 
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
             android:text="@string/onboarding"
-            android:textSize="22sp"
-            android:textStyle="bold" />
+            style="@style/Type.Title" />
 
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="24dp"
-            android:text="@string/onboarding_restricted_settings_title"
-            android:textStyle="bold" />
+            android:layout_marginTop="10dp"
+            android:text="@string/onboarding_intro"
+            style="@style/Type.Body" />
 
-        <TextView
+        <!-- Step 1 -->
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:text="@string/onboarding_restricted_settings_body" />
+            android:layout_marginTop="28dp"
+            android:background="@drawable/bg_card_outer"
+            android:padding="6dp"
+            android:orientation="vertical">
 
-        <TextView
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_card_inner"
+                android:orientation="vertical"
+                android:padding="20dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:background="@drawable/bg_badge"
+                    android:paddingStart="10dp"
+                    android:paddingEnd="10dp"
+                    android:paddingTop="4dp"
+                    android:paddingBottom="4dp"
+                    android:text="@string/step_one"
+                    style="@style/Type.Eyebrow" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:text="@string/onboarding_restricted_settings_title"
+                    style="@style/Type.Section" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:text="@string/onboarding_restricted_settings_body"
+                    style="@style/Type.Body" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- Step 2 -->
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="24dp"
-            android:text="@string/onboarding_install_title"
-            android:textStyle="bold" />
+            android:layout_marginTop="12dp"
+            android:background="@drawable/bg_card_outer"
+            android:padding="6dp"
+            android:orientation="vertical">
 
-        <TextView
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_card_inner"
+                android:orientation="vertical"
+                android:padding="20dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:background="@drawable/bg_badge"
+                    android:paddingStart="10dp"
+                    android:paddingEnd="10dp"
+                    android:paddingTop="4dp"
+                    android:paddingBottom="4dp"
+                    android:text="@string/step_two"
+                    style="@style/Type.Eyebrow" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:text="@string/onboarding_install_title"
+                    style="@style/Type.Section" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:text="@string/onboarding_install_body"
+                    style="@style/Type.Body" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- Step 3 -->
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:text="@string/onboarding_install_body" />
+            android:layout_marginTop="12dp"
+            android:background="@drawable/bg_card_outer"
+            android:padding="6dp"
+            android:orientation="vertical">
 
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="24dp"
-            android:text="@string/onboarding_private_dns_title"
-            android:textStyle="bold" />
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_card_inner"
+                android:orientation="vertical"
+                android:padding="20dp">
 
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:text="@string/onboarding_private_dns_body" />
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:background="@drawable/bg_badge"
+                    android:paddingStart="10dp"
+                    android:paddingEnd="10dp"
+                    android:paddingTop="4dp"
+                    android:paddingBottom="4dp"
+                    android:text="@string/step_three"
+                    style="@style/Type.Eyebrow" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:text="@string/onboarding_private_dns_title"
+                    style="@style/Type.Section" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:text="@string/onboarding_private_dns_body"
+                    style="@style/Type.Body" />
+            </LinearLayout>
+        </LinearLayout>
 
         <Button
             android:id="@+id/closeButton"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="24dp"
-            android:text="@string/close" />
+            android:layout_height="56dp"
+            android:layout_marginTop="26dp"
+            android:background="@drawable/bg_pill_primary"
+            android:gravity="center"
+            android:text="@string/close"
+            android:textAllCaps="false"
+            android:textColor="#04231A"
+            android:textSize="15sp"
+            android:textStyle="bold" />
 
     </LinearLayout>
 </ScrollView>
